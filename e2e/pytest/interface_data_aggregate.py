@@ -13,7 +13,7 @@ from http_requests import prepare_transmit_data, post_server_data, decode_value,
 from test_utilities import compare_data, encode_shell_bson
 
 
-class Aggregate(InterfaceData):
+class Aggregate(InterfaceData[dict[str, Any]]):
     def __init__(
         self,
         interface: str,
@@ -27,30 +27,34 @@ class Aggregate(InterfaceData):
         self.entries = entries
         self.timestamp = timestamp
 
-    def _send_server_data(self, helper: TestcaseHelper):
+    def _send_server_data(self, helper: TestcaseHelper, data: dict[str, Any]):
         data = {}
-        for key, value in self.entries.items():
+        for key, value in data.items():
             data[key] = prepare_transmit_data(key, value)
         post_server_data(helper.astarte_cfg, self.interface, self.path, data)
 
-    def _check_server_received_data(self, helper: TestcaseHelper, send_start: datetime):
-        received_data = get_server_data(
-            helper.astarte_cfg, self.interface, limit=1
-        )  # , since_after=timestamp, to=(timestamp + timedelta(seconds=1))
+    def _check_server_received_data(self, helper: TestcaseHelper, data: dict[str, Any]) -> bool:
+        received_data = get_server_data(helper.astarte_cfg, self.interface, limit=1)
 
         log.inf(f"Server aggregate data {received_data}")
 
-        for key, expected_value in self.entries.items():
-            parameter = self.path.split("/")[1]
-            got_value = decode_value(received_data[parameter][0][key], key)
+        try:
+            for key, expected_value in data.items():
+                parameter = self.path.split("/")[1]
+                got_value = decode_value(received_data[parameter][0][key], key)
 
-            if not compare_data(got_value, expected_value):
-                log.err(f"Mismatch for {endpoint}: expected {expected_value} got {got_value}")
-                raise ValueError(f"Mismatch for {endpoint}")
+                log.inf(f"Endpoint {key}: expected {expected_value} got {got_value}")
+                if not compare_data(got_value, expected_value):
+                    return False
+        except KeyError as e:
+            log.err(f"KeyError while accessing the object {e}")
+            return False
 
-    def _get_device_shell_commands(self, base_command: str) -> list[str]:
+        return True
+
+    def _get_device_shell_commands(self, base_command: str, data: dict[str, Any]) -> str:
         path = self.path
-        bson_base64 = encode_shell_bson(self.entries)
+        bson_base64 = encode_shell_bson(data)
 
         if self.timestamp:
             unix_t = int(self.timestamp.timestamp() * 1000)
@@ -58,4 +62,7 @@ class Aggregate(InterfaceData):
         else:
             command = f"{base_command} object {self.interface} {path} {bson_base64}"
 
-        return [command]
+        return command
+
+    def _get_single_send_elements(self) -> list[dict[str, Any]]:
+        return [self.entries]

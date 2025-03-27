@@ -9,6 +9,7 @@ import base64
 import json
 from typing import Any
 
+import curlify
 import requests
 from cfgvalues import CfgValues
 from dateutil import parser
@@ -43,7 +44,6 @@ def get_server_data(
         url += path
 
     headers = {"Authorization": "Bearer " + test_cfg.appengine_token}
-    log.inf(f"Sending HTTP GET request: {url}")
 
     params: dict[str, str] = {}
 
@@ -59,6 +59,7 @@ def get_server_data(
     res = requests.get(
         url, headers=headers, params=params, timeout=5, verify=test_cfg.appengine_cert
     )
+    log.inf(curlify.to_curl(res.request))
     if res.status_code != 200:
         if not quiet:
             log.err(res.text)
@@ -88,10 +89,10 @@ def post_server_data(
         "Authorization": "Bearer " + test_cfg.appengine_token,
         "Content-Type": "application/json",
     }
-    log.inf(f"Sending HTTP POST request: {url}\n{headers}\n{json_data}")
     res = requests.post(
         url=url, data=json_data, headers=headers, timeout=5, verify=test_cfg.appengine_cert
     )
+    log.inf(curlify.to_curl(res.request))
     if res.status_code != 200:
         if not quiet:
             log.err(res.text)
@@ -116,8 +117,8 @@ def unset_server_property(test_cfg: CfgValues, interface: str, endpoint: str, qu
         "Authorization": "Bearer " + test_cfg.appengine_token,
         "Content-Type": "application/json",
     }
-    log.inf(f"Sending HTTP DELETE request: {url}")
     res = requests.delete(url, headers=headers, timeout=5, verify=test_cfg.appengine_cert)
+    log.inf(curlify.to_curl(res.request))
     if res.status_code != 204:
         if not quiet:
             log.err(res.text)

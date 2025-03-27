@@ -8,7 +8,6 @@ from interface_data_aggregate import Aggregate
 from interface_data_datastream import Datastream, DatastreamMapping
 from interface_data_property import PropertySet, PropertyUnset, Property
 
-# TODO customize the data to send and receive different values
 data: list[InterfaceData] = [
     PropertySet(
         interface="org.astarte-platform.zephyr.e2etest.DeviceProperty",

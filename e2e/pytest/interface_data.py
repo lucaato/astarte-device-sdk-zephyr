@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from abc import ABC, abstractmethod
+from typing import Generic, TypeVar
+
 from datetime import datetime, timezone
 from enum import Enum
 import time
-from typing import Any
 
 from west import log
-
 from conftest import TestcaseHelper
 
 
@@ -18,7 +18,10 @@ class Ownership(Enum):
     SERVER = 2
 
 
-class InterfaceData(ABC):
+T = TypeVar("T", covariant=False)
+
+
+class InterfaceData(ABC, Generic[T]):
     """
     Base interface data class, defines a generic test method that handles
     sending and receiving data for both the server and the client.
@@ -30,23 +33,29 @@ class InterfaceData(ABC):
         self.ownership = ownership
 
     @abstractmethod
-    def _send_server_data(self, helper: TestcaseHelper):
+    def _send_server_data(self, helper: TestcaseHelper, data: T):
         """
-        Abstract method that handles sending the data from the server to the device
+        Abstract method that handles sending the data passed from the server to the device
         """
 
     @abstractmethod
-    def _check_server_received_data(self, helper: TestcaseHelper, send_start: datetime):
+    def _check_server_received_data(self, helper: TestcaseHelper, data: T) -> bool:
         """
         Abstract method that checks the data received by the server.
         This is the data that was sent the device using a "send" shell command
         """
 
     @abstractmethod
-    def _get_device_shell_commands(self, base_command: str) -> list[str]:
+    def _get_device_shell_commands(self, base_command: str, data: T) -> str:
         """
-        Gets the command that encodes all the data about this interface.
+        Gets the command that encodes the send/set or unset of this interface and the passed data.
         This comes in the form of '{base_command} <interface_name> <path> <bson_base64_data> <timestamp>'
+        """
+
+    @abstractmethod
+    def _get_single_send_elements(self) -> list[T]:
+        """
+        Get a list of element each corresponding to a single astarte send/set or unset command.
         """
 
     def test(self, helper: TestcaseHelper):
@@ -54,30 +63,23 @@ class InterfaceData(ABC):
         Test reception and transmission of this interface
         """
 
-        EXPECT_VERIFY_COMMAND = "expect verify"
         SEND_BASE_COMMAND = "send"
         EXPECT_BASE_COMMAND = "expect"
 
-        if self.ownership == Ownership.SERVER:
-            helper.exec_commands(self._get_device_shell_commands(EXPECT_BASE_COMMAND))
-            time.sleep(1)
-            # TODO should also test that the command gets executed and chec the presense of the confirmation string like "Property set"
-            self._send_server_data(helper)
-            # TODO Could add a command that waits for all message to be sent ?
-            time.sleep(2)
-            helper.exec_command(EXPECT_VERIFY_COMMAND)
-            helper.dut.readlines_until(regex="All expected data received$", timeout=10)
-        else:
-            send_start = datetime.now(tz=timezone.utc)
-            helper.exec_commands(self._get_device_shell_commands(SEND_BASE_COMMAND))
-
-            # retry ten times
-            for _ in range(0, 10):
+        for send in self._get_single_send_elements():
+            if self.ownership == Ownership.SERVER:
+                helper.exec_command(self._get_device_shell_commands(EXPECT_BASE_COMMAND, send))
+                self._send_server_data(helper, send)
                 time.sleep(1)
+            else:
+                helper.exec_command(self._get_device_shell_commands(SEND_BASE_COMMAND, send))
 
-                try:
-                    self._check_server_received_data(helper, send_start)
-                except (KeyError, ValueError) as e:
-                    log.inf(f"Missing server data {e}, retrying...")
+                # retry two times
+                for i in range(0, 10):
+                    result = self._check_server_received_data(helper, send)
 
-            self._check_server_received_data(helper, send_start)
+                    if result:
+                        log.inf(f"Validated server data")
+                        break
+
+                    log.inf(f"Missing sent data, retrying [{i}]...")

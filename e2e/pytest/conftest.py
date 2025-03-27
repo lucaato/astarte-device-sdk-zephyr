@@ -29,10 +29,6 @@ class TestcaseHelper:
         self.dut.write(f"{command}\n\n".encode())
         self.shell.wait_for_prompt(timeout=timeout)
 
-    def exec_commands(self, commands: list[str], timeout: float | None = None):
-        for com in commands:
-            self.exec_command(com, timeout=timeout)
-
 
 @pytest.fixture(scope="session")
 def astarte_cfg(dut: DeviceAdapter):

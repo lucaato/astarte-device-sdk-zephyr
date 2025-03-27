@@ -46,6 +46,13 @@ config E2E_APPENGINE_URL
     help
         Url of the appengine APIs exposed by astarte
 
+config LOG_ONLY
+    bool "Enable device log only mode"
+    default n
+    help
+        Incoming astarte server messages will only be logged and no check will be
+        performed against incoming data
+
 config DEVICE_THREAD_STACK_SIZE
     int "Device thread stack size (Bytes)"
     default 8192
@@ -109,9 +116,14 @@ module-str = Log level for e2e utilities functions
 module-help = Sets log level for e2e utilities functions
 source "subsys/logging/Kconfig.template.log_config"
 
-module = PROPERTY
-module-str = Log level for properties device test
-module-help = Sets log level for properties device test
+module = SHELL_HANDLERS
+module-str = Log level for shell handlers
+module-help = Sets log level for zephyr shell handlers
+source "subsys/logging/Kconfig.template.log_config"
+
+module = DEVICE_HANDLER
+module-str = Log level for device handler
+module-help = Sets log level for zephyr device handler
 source "subsys/logging/Kconfig.template.log_config"
 
 endmenu

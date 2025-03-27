@@ -13,9 +13,6 @@
  */
 #include "astarte_device_sdk/data.h"
 
-#include "astarte_device_sdk/astarte.h"
-#include "astarte_device_sdk/interface.h"
-#include "astarte_device_sdk/object.h"
 #include "bson_deserializer.h"
 #include "bson_serializer.h"
 

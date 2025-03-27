@@ -78,6 +78,8 @@ static void eth_thread_entry_point(void *unused1, void *unused2, void *unused3);
 
 int main(void)
 {
+    block_shell_commands();
+
     LOG_INF("Astarte device e2e test"); // NOLINT
 
     // Initialize Ethernet driver

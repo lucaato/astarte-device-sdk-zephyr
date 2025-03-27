@@ -31,7 +31,7 @@
 
 #define CHECK_RET_1(expr, ...)                                                                     \
     if (expr) {                                                                                    \
-        LOG_ERR(__VA_ARGS__); /* NOLINT */                                                         \
+        __VA_OPT__(LOG_ERR(__VA_ARGS__)); /* NOLINT */                                             \
         return 1;                                                                                  \
     }
 
@@ -59,14 +59,14 @@ ASTARTE_UTIL_DEFINE_ARRAY(e2e_byte_array, uint8_t);
 
 ASTARTE_UTIL_DEFINE_ARRAY(e2e_object_entry_array_t, astarte_object_entry_t);
 
-void astarte_object_print(e2e_object_entry_array_t *obj);
+void utils_log_e2e_timestamp(e2e_timestamp_option_t *timestamp);
+
+void utils_log_e2e_object_entry_array(e2e_object_entry_array_t *obj);
 
 bool astarte_object_equal(e2e_object_entry_array_t *left, e2e_object_entry_array_t *right);
 bool astarte_data_equal(astarte_data_t *left, astarte_data_t *right);
 
 void skip_parameter(char ***args, size_t *argc);
-const astarte_interface_t *next_interface_parameter(
-    char ***args, size_t *argc, const astarte_interface_t **interfaces, size_t interfaces_len);
 e2e_timestamp_option_t next_timestamp_parameter(char ***args, size_t *argc);
 // the return of this function needs to be deallocated
 char *next_alloc_string_parameter(char ***args, size_t *argc);

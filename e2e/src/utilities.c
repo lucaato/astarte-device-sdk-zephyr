@@ -14,6 +14,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/base64.h>
 #include <zephyr/sys/bitarray.h>
+#include <zephyr/sys/timeutil.h>
 #include <zephyr/sys/util.h>
 
 #include <astarte_device_sdk/data.h>
@@ -42,6 +43,8 @@ LOG_MODULE_REGISTER(utilities, CONFIG_UTILITIES_LOG_LEVEL); // NOLINT
 // The limit of interface mappings and following of object entries is 1024
 // https://docs.astarte-platform.org/astarte/latest/040-interface_schema.html#interface
 #define OBJECT_MAX_ENTRIES 1024
+
+#define MAX_TS_STR_LEN 30
 
 /************************************************
  *         Static functions declaration         *
@@ -172,42 +175,22 @@ bool astarte_data_equal(astarte_data_t *left, astarte_data_t *right)
     CHECK_HALT(true, "Unreachable, the previous switch should handle all possible cases");
 }
 
-void astarte_object_print(e2e_object_entry_array_t *obj)
+void utils_log_e2e_timestamp(e2e_timestamp_option_t *timestamp)
 {
-    for (size_t i = 0; i < obj->len; ++i) {
-        ASTARTE_LOG_INF("Path: %s", obj->buf[i].path);
-        utils_log_astarte_data(obj->buf[i].data);
+    struct tm *tm_obj = NULL;
+    char tm_str[MAX_TS_STR_LEN] = { 0 };
+    if (timestamp->present) {
+        tm_obj = gmtime(&timestamp->value);
+        (void) strftime(tm_str, MAX_TS_STR_LEN, "%Y-%m-%dT%H:%M:%S%z", tm_obj);
+        LOG_INF("Timestamp: %s", tm_str); // NOLINT
+    } else {
+        LOG_INF("No timestamp"); // NOLINT
     }
 }
 
-const astarte_interface_t *next_interface_parameter(
-    char ***args, size_t *argc, const astarte_interface_t **const interfaces, size_t interfaces_len)
+void utils_log_e2e_object_entry_array(e2e_object_entry_array_t *obj)
 {
-    if (*argc < 1) {
-        // no more arguments
-        return NULL;
-    }
-
-    const char *const arg = (*args)[0];
-    const astarte_interface_t *interface = NULL;
-
-    for (size_t i = 0; i < interfaces_len; ++i) {
-        if (strcmp(interfaces[i]->name, arg) == 0) {
-            interface = interfaces[i];
-            break;
-        }
-    }
-
-    if (!interface) {
-        // no interface with name specified found
-        LOG_ERR("Invalid interface name %s", arg); // NOLINT
-        return NULL;
-    }
-
-    // move to the next parameter for caller
-    *args += 1;
-    *argc -= 1;
-    return interface;
+    utils_log_astarte_object(obj->buf, obj->len);
 }
 
 void skip_parameter(char ***args, size_t *argc)
