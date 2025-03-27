@@ -109,9 +109,9 @@ module-str = Log level for e2e utilities functions
 module-help = Sets log level for e2e utilities functions
 source "subsys/logging/Kconfig.template.log_config"
 
-module = PROPERTY
-module-str = Log level for properties device test
-module-help = Sets log level for properties device test
+module = SHELL_HANDLERS
+module-str = Log level for shell handlers
+module-help = Sets log level for zephyr shell handlers
 source "subsys/logging/Kconfig.template.log_config"
 
 endmenu

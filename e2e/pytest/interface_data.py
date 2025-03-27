@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
 import time
-from typing import Any
 
 from west import log
 

@@ -8,6 +8,8 @@ from interface_data_aggregate import Aggregate
 from interface_data_datastream import Datastream, DatastreamMapping
 from interface_data_property import PropertySet, PropertyUnset, Property
 
+# FIXME we could separate the data into single send groups
+# individuals should have just one element, we should either split them up here or change the logic of the test
 # TODO customize the data to send and receive different values
 data: list[InterfaceData] = [
     PropertySet(

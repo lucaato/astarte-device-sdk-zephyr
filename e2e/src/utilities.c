@@ -180,36 +180,6 @@ void astarte_object_print(e2e_object_entry_array_t *obj)
     }
 }
 
-const astarte_interface_t *next_interface_parameter(
-    char ***args, size_t *argc, const astarte_interface_t **const interfaces, size_t interfaces_len)
-{
-    if (*argc < 1) {
-        // no more arguments
-        return NULL;
-    }
-
-    const char *const arg = (*args)[0];
-    const astarte_interface_t *interface = NULL;
-
-    for (size_t i = 0; i < interfaces_len; ++i) {
-        if (strcmp(interfaces[i]->name, arg) == 0) {
-            interface = interfaces[i];
-            break;
-        }
-    }
-
-    if (!interface) {
-        // no interface with name specified found
-        LOG_ERR("Invalid interface name %s", arg); // NOLINT
-        return NULL;
-    }
-
-    // move to the next parameter for caller
-    *args += 1;
-    *argc -= 1;
-    return interface;
-}
-
 void skip_parameter(char ***args, size_t *argc)
 {
     if (*argc < 1) {
