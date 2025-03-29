@@ -17,13 +17,11 @@
 #define MAIN_THREAD_SLEEP_MS 500
 
 void device_setup(astarte_device_config_t config);
-
 // these functions read device_thread_flags and wait appropriately
 // flag DEVICE_CONNECTED_FLAG
 void wait_for_connection();
 void wait_for_disconnection();
 // flag THREAD_TERMINATION_FLAG
-bool get_termination();
 void wait_for_destroyed_device();
 // --
 // these functions write device_thread_flags

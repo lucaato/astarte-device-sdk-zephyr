@@ -143,6 +143,8 @@ void run_e2e_test()
 {
     LOG_INF("Running e2e test"); // NOLINT
     // initialize idata, no need to lock since no shell is active currenlty
+    // NOTE the order matters, we must initialize idata before the shell is started
+    // since it could use idata to store expected messages
     idata_init(interfaces, ARRAY_SIZE(interfaces), interfaces_perfect_hash);
     // sets up the global device_handle
     astarte_device_config_t config = {

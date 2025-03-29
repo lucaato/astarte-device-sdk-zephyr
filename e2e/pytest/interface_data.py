@@ -48,6 +48,13 @@ class InterfaceData(ABC):
         This comes in the form of '{base_command} <interface_name> <path> <bson_base64_data> <timestamp>'
         """
 
+    @abstractmethod
+    def _unroll_interface_data_to_send() -> list[]:
+       """
+       Unroll interface data that contains an array of individual into a list of interface
+       with single fields.
+       """
+
     def test(self, helper: TestcaseHelper):
         """
         Test reception and transmission of this interface
@@ -57,6 +64,7 @@ class InterfaceData(ABC):
         SEND_BASE_COMMAND = "send"
         EXPECT_BASE_COMMAND = "expect"
 
+        # for unroll data
         if self.ownership == Ownership.SERVER:
             helper.exec_commands(self._get_device_shell_commands(EXPECT_BASE_COMMAND))
             time.sleep(2)

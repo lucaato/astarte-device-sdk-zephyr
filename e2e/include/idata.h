@@ -66,7 +66,7 @@ typedef struct
     astarte_message_t *expected_buf[2];
 } idata_map_value_t;
 
-typedef uint64_t (*interfaces_hash_t)(char* key_string, size_t len);
+typedef uint64_t (*interfaces_hash_t)(const char* key_string, size_t len);
 
 typedef struct
 {
@@ -75,7 +75,7 @@ typedef struct
 } e2e_idata_t;
 
 void idata_init(const astarte_interface_t *interfaces[], size_t interfaces_len, interfaces_hash_t hash_fn);
-const astarte_interface_t *idata_get_interface(e2e_idata_t *idata, char *interface_name);
+const astarte_interface_t *idata_get_interface(const char *interface_name);
 int idata_expect_individual(const astarte_interface_t *interface, e2e_individual_data_t expected_individual);
 //int idata_add_property(e2e_idata_t *idata, const astarte_interface_t *interface,
 //    e2e_property_data_t expected_property);
