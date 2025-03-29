@@ -9,6 +9,8 @@
 
 LOG_MODULE_REGISTER(shell_handlers, CONFIG_SHELL_HANDLERS_LOG_LEVEL); // NOLINT
 
+static const astarte_interface_t *next_interface_parameter(
+    char ***args, size_t *argc);
 static int parse_alloc_astarte_invividual(const astarte_interface_t *interface, char *path,
     e2e_byte_array *buf, astarte_data_t *out_data);
 static int parse_alloc_astarte_object(const astarte_interface_t *interface, char *path,
@@ -21,7 +23,7 @@ int cmd_expect_individual_handler(const struct shell *sh, size_t argc, char **ar
 
     // ignore the first parameter since it's the name of the command itself
     skip_parameter(&argv, &argc);
-    const astarte_interface_t *interface = next_interface_parameter(&argv, &argc, idata);
+    const astarte_interface_t *interface = next_interface_parameter(&argv, &argc);
     CHECK_GOTO(!interface, cleanup, "Invalid interface name passed");
     char *path = next_alloc_string_parameter(&argv, &argc);
     CHECK_GOTO(!path, cleanup, "Invalid path parameter passed");
@@ -34,8 +36,7 @@ int cmd_expect_individual_handler(const struct shell *sh, size_t argc, char **ar
         cleanup, "Could not parse and allocate astarte individual");
 
     // path and individual will be freed by the idata_unit free function
-    CHECK_GOTO(idata_add_individual(&expected_data, interface,
-                   (e2e_individual_data_t) {
+    CHECK_GOTO(idata_expect_individual(interface, (e2e_individual_data_t) {
                        .data = data,
                        .path = path,
                        .timestamp = timestamp,
@@ -62,7 +63,7 @@ int cmd_expect_object_handler(const struct shell *sh, size_t argc, char **argv)
     // ignore the first parameter since it's the name of the command itself
     skip_parameter(&argv, &argc);
     // path and interface check should not fail no checks performed
-    char *interface = next_alloc_string_parameter(&argv, &argc);
+    const astarte_interface_t *interface = next_interface_parameter(&argv, &argc);
     CHECK_GOTO(!interface, cleanup, "Invalid interface name passed");
     char *path = next_alloc_string_parameter(&argv, &argc);
     CHECK_GOTO(!path, cleanup, "Invalid path parameter passed");
@@ -83,7 +84,7 @@ int cmd_expect_object_handler(const struct shell *sh, size_t argc, char **argv)
     //});
 
     // path, object_bytes and object_entries will be freed by the idata_unit free function
-    CHECK_GOTO(idata_add_object(&expected_data, interface, (e2e_object_data_t) {
+    CHECK_GOTO(idata_expect_object(interface, (e2e_object_data_t) {
              .entries = {
                  .buf = entries,
                  .len = entries_length,
@@ -385,8 +386,8 @@ int cmd_disconnect(const struct shell *sh, size_t argc, char **argv)
 }
 
 
-const astarte_interface_t *next_interface_parameter(
-    char ***args, size_t *argc, e2e_idata_t *idata)
+static const astarte_interface_t *next_interface_parameter(
+    char ***args, size_t *argc)
 {
     if (*argc < 1) {
         // no more arguments
@@ -394,7 +395,7 @@ const astarte_interface_t *next_interface_parameter(
     }
 
     const char *const interface_name = (*args)[0];
-    const astarte_interface_t *interface = idata_get_interface(idata, interface_name);
+    const astarte_interface_t *interface = idata_get_interface(interface_name);
 
     if (!interface) {
         // no interface with name specified found

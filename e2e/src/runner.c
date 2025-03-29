@@ -132,7 +132,7 @@ static void device_property_unset_callback(astarte_device_data_event_t event);
 // NOTE change this function if interfaces name, or set of interfaces, change. It relies
 // on current interface names to create a simple but unique hash.
 // If more interfaces are added this function should also change.
-static uint64_t interfaces_perfect_hash(char* key_string, size_t len);
+static uint64_t interfaces_perfect_hash(const char* key_string, size_t len);
 
 /************************************************
  * Global functions definition
@@ -143,6 +143,8 @@ void run_e2e_test()
 {
     LOG_INF("Running e2e test"); // NOLINT
     // initialize idata, no need to lock since no shell is active currenlty
+    // NOTE the order matters, we must initialize idata before the shell is started
+    // since it could use idata to store expected messages
     idata_init(interfaces, ARRAY_SIZE(interfaces), interfaces_perfect_hash);
     // sets up the global device_handle
     astarte_device_config_t config = {
@@ -188,44 +190,34 @@ static void device_individual_callback(astarte_device_datastream_individual_even
 {
     LOG_INF("Individual datastream callback");
 
-    e2e_individual_data_t *individual = { 0 };
-    // inizialization
-    idata_get_individual(&expected_data, event.base_event.interface_name, &individual);
+    e2e_individual_data_t expected = { 0 };
+    const astarte_interface_t *interface = idata_get_interface(event.base_event.interface_name);
+    CHECK_HALT(interface == NULL, "The interface name received as event does not match any interface");
 
-    for (; individual != NULL;
-        idata_get_individual(&expected_data, event.base_event.interface_name, &individual)) {
-        if (strcmp(individual->path, event.base_event.path) != 0) {
-            // skip element if on a different path
-            continue;
-        }
-
-        LOG_DBG("Comparing values\nExpected:");
-        utils_log_astarte_data(individual->data);
-        LOG_DBG("Received:");
-        utils_log_astarte_data(event.data);
-
-        if (!astarte_data_equal(&individual->data, &event.data)) {
-            LOG_ERR("Unexpected element received on path '%s'", individual->path);
-            unexpected_data_count += 1;
-            goto unlock;
-        }
-
-        LOG_INF("Received expected value on '%s' '%s'", event.base_event.interface_name,
-            individual->path);
-
-        utils_log_astarte_data(event.data);
-
-        expected_data_count += 1;
-        idata_remove_individual(individual);
-
-        goto unlock;
+    // get next expected element
+    // TODO it makes sense to fail here if we can signal it immediately to pytest
+    // otherwise increment unexpected counter
+    // if we increment the counter we probably need to lock, even if the callbacks should be only called by one thread
+    // we can probably just CHECK_HALT here and that should make the e2e fail
+    if (idata_pop_individual(interface, &expected) != 0) {
+        // inc        
+        //unexpected_data_count += 1;
     }
 
-    LOG_ERR("No more expected individual but got data on interface '%s'",
-        event.base_event.interface_name);
+    LOG_DBG("Comparing values");
+    LOG_DBG("Expected:");
+    utils_log_astarte_data(expected.data);
+    LOG_DBG("Received:");
+    utils_log_astarte_data(event.data);
 
-unlock:
-    k_mutex_unlock(&expected_data_mutex);
+    if (!astarte_data_equal(&expected.data, &event.data)) {
+        LOG_ERR("Unexpected element received on '%s' path '%s'", interface->name, expected.path);
+        // TODO // unexpected_data_count += 1;
+    }
+
+    LOG_INF("Received expected value on '%s' '%s'", interface->name,
+        expected.path);
+    // TODO increment expected count ?
 }
 
 static void device_object_callback(astarte_device_datastream_object_event_t event)
@@ -383,10 +375,10 @@ static void disconnection_callback(astarte_device_disconnection_event_t event)
     set_disconnected();
 }
 
-static uint64_t interfaces_perfect_hash(char* key_string, size_t len) {
+static uint64_t interfaces_perfect_hash(const char* key_string, size_t len) {
     const char interface_dname[] = "org.astarte-platform.zephyr.e2etest.";
-    const size_t interface_dname_sd_idetifier = 36;
-    const size_t interface_dname_adp_idetifier = 43;
+    const size_t interface_dname_ownership_idetifier = 36;
+    const size_t interface_dname_type_idetifier = 43;
 
     // check that the string is a known interface name and has enough characters for our check
     CHECK_HALT(strstr(key_string, interface_dname) == key_string && len > 44,
@@ -394,10 +386,10 @@ static uint64_t interfaces_perfect_hash(char* key_string, size_t len) {
 
     uint32_t result = { 0 };
     uint8_t *result_bytes = (uint8_t *) &result;
-    result_bytes[0] = key_string[interface_dname_sd_idetifier];
-    result_bytes[1] = key_string[interface_dname_sd_idetifier];
-    result_bytes[2] = key_string[interface_dname_adp_idetifier];
-    result_bytes[3] = key_string[interface_dname_adp_idetifier];
+    result_bytes[0] = key_string[interface_dname_ownership_idetifier];
+    result_bytes[1] = key_string[interface_dname_ownership_idetifier];
+    result_bytes[2] = key_string[interface_dname_type_idetifier];
+    result_bytes[3] = key_string[interface_dname_type_idetifier];
 
     return result;
 }

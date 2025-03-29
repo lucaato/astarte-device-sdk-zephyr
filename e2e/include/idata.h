@@ -66,7 +66,7 @@ typedef struct
     astarte_message_t *expected_buf[2];
 } idata_map_value_t;
 
-typedef uint64_t (*interfaces_hash_t)(char* key_string, size_t len);
+typedef uint64_t (*interfaces_hash_t)(const char* key_string, size_t len);
 
 typedef struct
 {
@@ -75,27 +75,28 @@ typedef struct
 } e2e_idata_t;
 
 void idata_init(const astarte_interface_t *interfaces[], size_t interfaces_len, interfaces_hash_t hash_fn);
-const astarte_interface_t *idata_get_interface(e2e_idata_t *idata, char *interface_name);
+
+// get an interface object of the specified interface name
+// the interfaces map got initialized in `idata_init`
+const astarte_interface_t *idata_get_interface(const char *interface_name);
+
+// add an expected message to the specified interface
 int idata_expect_individual(const astarte_interface_t *interface, e2e_individual_data_t expected_individual);
-//int idata_add_property(e2e_idata_t *idata, const astarte_interface_t *interface,
-//    e2e_property_data_t expected_property);
-//int idata_add_object(
-//    e2e_idata_t *idata, const astarte_interface_t *interface, e2e_object_data_t expected_object);
-//// get functions, these fetch the next idata unit matching the passed interface name using the
-//// passed out_individual as starting point if out individual is null they return the first
-//// occurrence
-//int idata_get_individual(
-//    e2e_idata_t *idata, const char *interface, e2e_individual_data_t **out_individual);
-//int idata_get_property(
-//    e2e_idata_t *idata, const char *interface, e2e_property_data_t **out_property);
-//int idata_get_object(e2e_idata_t *idata, const char *interface, e2e_object_data_t **out_object);
-//bool idata_is_empty(e2e_idata_t *idata);
-//e2e_idata_unit_t *idata_iter(e2e_idata_t *idata);
-//e2e_idata_unit_t *idata_iter_next(e2e_idata_t *idata, e2e_idata_unit_t *current);
-//int idata_remove(e2e_idata_unit_t *idata_unit);
-//int idata_remove_individual(e2e_individual_data_t *individual);
-//int idata_remove_property(e2e_property_data_t *property);
-//int idata_remove_object(e2e_object_data_t *object);
+int idata_expect_property(
+    const astarte_interface_t *interface, e2e_property_data_t expected_property);
+int idata_expect_object(
+    const astarte_interface_t *interface, e2e_object_data_t expected_object);
+
+// pop next element expected for the specified interface (if set the return needs to be freed)
+int idata_pop_individual(const astarte_interface_t *interface, e2e_individual_data_t *out_individual);
+int idata_pop_property(const astarte_interface_t *interface, e2e_property_data_t *out_property);
+int idata_pop_object(const astarte_interface_t *interface, e2e_object_data_t *out_object);
+
+// after popping items you need to free the element
+void free_individual(e2e_individual_data_t individual);
+void free_object(e2e_object_data_t object);
+void free_property(e2e_property_data_t property);
+
 void idata_free();
 
 #endif // IDATA_H

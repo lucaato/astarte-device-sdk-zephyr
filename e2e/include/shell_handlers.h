@@ -17,18 +17,18 @@
 
 #include <zephyr/shell/shell.h>
 
-int cmd_expect_object_handler(const struct shell *sh, size_t argc, char **argv);
-int cmd_expect_individual_handler(const struct shell *sh, size_t argc, char **argv);
-int cmd_expect_property_set_handler(const struct shell *sh, size_t argc, char **argv);
-int cmd_expect_property_unset_handler(const struct shell *sh, size_t argc, char **argv);
-int cmd_expect_verify_handler(const struct shell *sh, size_t argc, char **argv);
+int cmd_expect_object_handler(const struct shell *shell, size_t argc, char **argv);
+int cmd_expect_individual_handler(const struct shell *shell, size_t argc, char **argv);
+int cmd_expect_property_set_handler(const struct shell *shell, size_t argc, char **argv);
+int cmd_expect_property_unset_handler(const struct shell *shell, size_t argc, char **argv);
+int cmd_expect_verify_handler(const struct shell *shell, size_t argc, char **argv);
 
-int cmd_send_individual_handler(const struct shell *sh, size_t argc, char **argv);
-int cmd_send_object_handler(const struct shell *sh, size_t argc, char **argv);
-int cmd_send_property_set_handler(const struct shell *sh, size_t argc, char **argv);
-int cmd_send_property_unset_handler(const struct shell *sh, size_t argc, char **argv);
+int cmd_send_individual_handler(const struct shell *shell, size_t argc, char **argv);
+int cmd_send_object_handler(const struct shell *shell, size_t argc, char **argv);
+int cmd_send_property_set_handler(const struct shell *shell, size_t argc, char **argv);
+int cmd_send_property_unset_handler(const struct shell *shell, size_t argc, char **argv);
 
-int cmd_disconnect(const struct shell *sh, size_t argc, char **argv);
+int cmd_disconnect(const struct shell *shell, size_t argc, char **argv);
 
 #endif /* E2ESHELL_HANDLERS_H */
 

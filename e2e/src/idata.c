@@ -21,7 +21,9 @@
 #include "zephyr/sys/dlist.h"
 #include "zephyr/sys/hash_map.h"
 #include "zephyr/sys/hash_map_api.h"
+#include "zephyr/sys/spsc_lockfree.h"
 #include "zephyr/sys/util.h"
+#include "zephyr/toolchain.h"
 
 /************************************************
  * Constants, static variables and defines
@@ -42,12 +44,10 @@ K_SEM_DEFINE(idata_sem, 1, 1);
 static uint64_t idata_hash_intf(const astarte_interface_t *interface);
 static uint64_t idata_hash_name(const char *interface_name, size_t len);
 
-static idata_map_value_t map_get();
+static bool map_get(const astarte_interface_t *interface, idata_map_value_t **value);
+static bool map_get_by_name(const char *interface_name, idata_map_value_t **value);
 
-// called during initialization to initlialize the hashmap entry
-static void idata_init_interface(struct sys_hashmap *interface_map, const astarte_interface_t *interface);
-
-static void free_hashmap_value(uint64_t key, uint64_t value, void *cookie);
+static void free_map_entry_callback(uint64_t key, uint64_t value, void *user_data);
 
 /************************************************
  * Global functions definition
@@ -72,7 +72,18 @@ void idata_init(const astarte_interface_t *interfaces[], size_t interfaces_len, 
     };
 
     for (size_t i = 0; i < interfaces_len; ++i) {
-        idata_init_interface(&interface_map, interfaces[i]);
+        uint64_t key = idata_hash_intf(interfaces[i]);
+        idata_map_value_t *allocated_value = malloc(sizeof(idata_map_value_t));
+        idata_map_value_t initialized_value = (idata_map_value_t) {
+            .interface = interfaces[i],
+            // the parameters of SPSC_INITIALIZER needs to point to allocated_value
+            // since that will be the final memory location
+            .expected = SPSC_INITIALIZER(ARRAY_SIZE(allocated_value->expected_buf), (astarte_message_t * const) allocated_value->expected_buf),
+            .expected_buf = { 0 },
+        };
+        memcpy(allocated_value, &initialized_value, sizeof(initialized_value));
+
+        sys_hashmap_insert(&interface_map, key, POINTER_TO_UINT(allocated_value), NULL);
     }
 
     // FIXME i should add a check to every function to verify that the idata is initialized
@@ -83,19 +94,19 @@ void idata_init(const astarte_interface_t *interfaces[], size_t interfaces_len, 
     };
 }
 
-const astarte_interface_t *idata_get_interface(e2e_idata_t *idata, char *interface_name) {
+const astarte_interface_t *idata_get_interface(const char *interface_name) {
     uint64_t key = idata_hash_name(interface_name, strlen(interface_name));
 
     uint64_t value = { 0 };
-    sys_hashmap_get(&idata->iface_map, key, &value);
+    sys_hashmap_get(&idata.iface_map, key, &value);
 
     if (value) {
+        // NOLINTNEXTLINE
         idata_map_value_t *map_value = UINT_TO_POINTER(value);
         return map_value->interface;
     }
-    else {
-        return NULL;
-    }
+
+     return NULL;
 }
 
 int idata_expect_individual(const astarte_interface_t *interface,
@@ -103,215 +114,141 @@ int idata_expect_individual(const astarte_interface_t *interface,
 {
     CHECK_RET_1(interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL,
         "Incorrect aggregation type in interface passed to expected_add_individual");
-    CHECK_RET_1(interface->type == ASTARTE_INTERFACE_TYPE_PROPERTIES,
+    CHECK_RET_1(interface->type != ASTARTE_INTERFACE_TYPE_DATASTREAM,
         "Incorrect interface type in interface passed to expected_add_individual");
 
-    uint64_t key = idata_hash_name(interface_name, strlen(interface_name));
-    uint64_t value = { 0 };
-    sys_hashmap_get(&idata->iface_map, key, &value);
+    idata_map_value_t *value = {};
+    CHECK_RET_1(!map_get(interface, &value), "Unknown passed interface");
+
+    astarte_message_t *message = spsc_acquire(&value->expected);
+    CHECK_RET_1(message == NULL, "Space for expected messages is exhausted");
+    message->individual = expected_individual;
+    spsc_produce(&value->expected);
 
     return 0;
 }
 
-int idata_add_property(
-    e2e_idata_t *idata, const astarte_interface_t *interface, e2e_property_data_t expected_property)
+int idata_expect_property(
+    const astarte_interface_t *interface, e2e_property_data_t expected_property)
 {
     CHECK_RET_1(interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL,
         "Incorrect aggregation type in interface passed to expected_add_property");
     CHECK_RET_1(interface->type != ASTARTE_INTERFACE_TYPE_PROPERTIES,
         "Incorrect interface type in interface passed to expected_add_property");
 
-    e2e_idata_unit_t *element = calloc(1, sizeof(e2e_idata_unit_t));
-    CHECK_HALT(!element, "Could not allocate an e2e_expected_unit_t");
+    idata_map_value_t *value = {};
+    CHECK_RET_1(!map_get(interface, &value), "Unknown passed interface");
 
-    *element = (e2e_idata_unit_t) {
-        .interface = interface,
-        .values.property = expected_property,
-    };
-
-    sys_dnode_init(&element->node);
-    sys_dlist_append(idata->list, &element->node);
+    astarte_message_t *message = spsc_acquire(&value->expected);
+    CHECK_RET_1(message == NULL, "Space for expected messages is exhausted");
+    message->property = expected_property;
+    spsc_produce(&value->expected);
 
     return 0;
 }
 
-int idata_add_object(
-    e2e_idata_t *idata, const astarte_interface_t *interface, e2e_object_data_t expected_object)
+int idata_expect_object(
+    const astarte_interface_t *interface, e2e_object_data_t expected_object)
 {
     CHECK_RET_1(interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_OBJECT,
-        "Incorrect aggregation type in interface passed to e2e_interface_t object constructor");
+        "Incorrect aggregation type in interface passed");
+    CHECK_RET_1(interface->type != ASTARTE_INTERFACE_TYPE_DATASTREAM,
+        "Incorrect interface type in interface passed");
 
-    e2e_idata_unit_t *element = calloc(1, sizeof(e2e_idata_unit_t));
-    CHECK_HALT(!element, "Could not allocate an e2e_expected_unit_t");
+    idata_map_value_t *value = {};
+    CHECK_RET_1(!map_get(interface, &value), "Unknown passed interface");
 
-    *element = (e2e_idata_unit_t) {
-        .interface = interface,
-        .values.object = expected_object,
-    };
-
-    sys_dnode_init(&element->node);
-    sys_dlist_append(idata->list, &element->node);
+    astarte_message_t *message = spsc_acquire(&value->expected);
+    CHECK_RET_1(message == NULL, "Space for expected messages is exhausted");
+    message->object = expected_object;
+    spsc_produce(&value->expected);
 
     return 0;
 }
 
-bool idata_is_empty(e2e_idata_t *idata)
+int idata_pop_individual(
+    const astarte_interface_t *interface, e2e_individual_data_t *out_individual)
 {
-    return sys_dlist_is_empty(idata->list);
-}
+    CHECK_RET_1(out_individual == NULL, "Passed out pointer is null");
 
-int idata_get_individual(
-    e2e_idata_t *idata, const char *interface, e2e_individual_data_t **out_individual)
-{
-    e2e_idata_unit_t *unit = NULL;
-
-    if (*out_individual != NULL) {
-        unit = CONTAINER_OF(*out_individual, e2e_idata_unit_t, values.individual);
-        // we expect the passed pointer to be the last match so we skip it (i dont like it)
-        unit = idata_iter_next(idata, unit);
-    } else {
-        unit = idata_iter(idata);
-    }
-
-    unit = idata_get_fist_interface_unit(idata, unit, interface);
-
-    if (!unit) {
-        *out_individual = NULL;
-        return 0;
-    }
-
-    CHECK_RET_1(unit->interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL,
+    CHECK_RET_1(interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL,
         "Incorrect interface aggregation associated with interface name passed");
-    CHECK_RET_1(unit->interface->type == ASTARTE_INTERFACE_TYPE_PROPERTIES,
+    CHECK_RET_1(interface->type == ASTARTE_INTERFACE_TYPE_PROPERTIES,
         "Incorrect interface type associated with interface name passed");
 
-    *out_individual = &unit->values.individual;
+    idata_map_value_t *value = {};
+    CHECK_RET_1(!map_get(interface, &value), "Unknown passed interface");
+    astarte_message_t *message = spsc_consume(&value->expected);
+    CHECK_RET_1(message == NULL, "No more expected messages");
+
+    *out_individual = message->individual;
+
     return 0;
 }
 
-int idata_get_property(
-    e2e_idata_t *idata, const char *interface, e2e_property_data_t **out_property)
+int idata_pop_property(
+    const astarte_interface_t *interface, e2e_property_data_t *out_property)
 {
-    e2e_idata_unit_t *unit = NULL;
+    CHECK_RET_1(out_property == NULL, "Passed out pointer is null");
 
-    if (*out_property != NULL) {
-        unit = CONTAINER_OF(*out_property, e2e_idata_unit_t, values.property);
-        // we expect the passed pointer to be the last match so we skip it (i dont like it)
-        unit = idata_iter_next(idata, unit);
-    } else {
-        unit = idata_iter(idata);
-    }
-
-    unit = idata_get_fist_interface_unit(idata, unit, interface);
-
-    if (!unit) {
-        *out_property = NULL;
-        return 0;
-    }
-
-    CHECK_RET_1(unit->interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL,
+    CHECK_RET_1(interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL,
         "Incorrect interface aggregation associated with interface name passed");
-    CHECK_RET_1(unit->interface->type != ASTARTE_INTERFACE_TYPE_PROPERTIES,
+    CHECK_RET_1(interface->type != ASTARTE_INTERFACE_TYPE_PROPERTIES,
         "Incorrect interface type associated with interface name passed");
 
-    *out_property = &unit->values.property;
+    idata_map_value_t *value = {};
+    CHECK_RET_1(!map_get(interface, &value), "Unknown passed interface");
+    astarte_message_t *message = spsc_consume(&value->expected);
+    CHECK_RET_1(message == NULL, "No more expected messages");
+
+    *out_property = message->property;
     return 0;
 }
 
-int idata_get_object(e2e_idata_t *idata, const char *interface, e2e_object_data_t **out_object)
+int idata_pop_object(const astarte_interface_t *interface, e2e_object_data_t *out_object)
 {
-    e2e_idata_unit_t *unit = NULL;
+    CHECK_RET_1(out_object == NULL, "Passed out pointer is null");
 
-    if (*out_object != NULL) {
-        unit = CONTAINER_OF(*out_object, e2e_idata_unit_t, values.object);
-        // we expect the passed pointer to be the last match so we skip it (i dont like it)
-        unit = idata_iter_next(idata, unit);
-    } else {
-        unit = idata_iter(idata);
-    }
-
-    unit = idata_get_fist_interface_unit(idata, unit, interface);
-
-    if (!unit) {
-        *out_object = NULL;
-        return 0;
-    }
-
-    CHECK_RET_1(unit->interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_OBJECT,
+    CHECK_RET_1(interface->aggregation != ASTARTE_INTERFACE_AGGREGATION_OBJECT,
         "Incorrect interface aggregation associated with interface name passed");
+    CHECK_RET_1(interface->type != ASTARTE_INTERFACE_TYPE_DATASTREAM,
+        "Incorrect interface type in interface passed");
 
-    *out_object = &unit->values.object;
+    idata_map_value_t *value = {};
+    CHECK_RET_1(!map_get(interface, &value), "Unknown passed interface");
+    astarte_message_t *message = spsc_consume(&value->expected);
+    CHECK_RET_1(message == NULL, "No more expected messages");
+
+    *out_object = message->object;
     return 0;
 }
 
-e2e_idata_unit_t *idata_iter(e2e_idata_t *idata)
-{
-    e2e_idata_unit_t *current = NULL;
-
-    return SYS_DLIST_PEEK_HEAD_CONTAINER(idata->list, current, node);
+void free_individual(e2e_individual_data_t individual) {
+    free((char *) individual.path);
+    astarte_data_destroy_deserialized(individual.data);
 }
 
-e2e_idata_unit_t *idata_iter_next(e2e_idata_t *idata, e2e_idata_unit_t *current)
-{
-    return SYS_DLIST_PEEK_NEXT_CONTAINER(idata->list, current, node);
+void free_object(e2e_object_data_t object) {
+    free((char *) object.path);
+    free(object.object_bytes.buf);
+    astarte_object_entries_destroy_deserialized(
+        object.entries.buf, object.entries.len);
 }
 
-int idata_remove_individual(e2e_individual_data_t *individual)
-{
-    e2e_idata_unit_t *unit = CONTAINER_OF(individual, e2e_idata_unit_t, values.individual);
-
-    return idata_remove(unit);
-}
-
-int idata_remove_property(e2e_property_data_t *property)
-{
-    e2e_idata_unit_t *unit = CONTAINER_OF(property, e2e_idata_unit_t, values.property);
-
-    return idata_remove(unit);
-}
-
-int idata_remove_object(e2e_object_data_t *object)
-{
-    e2e_idata_unit_t *unit = CONTAINER_OF(object, e2e_idata_unit_t, values.object);
-
-    return idata_remove(unit);
-}
-
-int idata_remove(e2e_idata_unit_t *idata_unit)
-{
-    if (idata_unit->interface->type == ASTARTE_INTERFACE_TYPE_PROPERTIES) {
-        e2e_property_data_t *property_data = &idata_unit->values.property;
-
-        // unsets do not store an individual value
-        if (!property_data->unset) {
-            astarte_data_destroy_deserialized(property_data->data);
-        }
-
-        free((char *) property_data->path);
-    } else if (idata_unit->interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL) {
-        e2e_individual_data_t *individual_data = &idata_unit->values.individual;
-
-        free((char *) individual_data->path);
-        astarte_data_destroy_deserialized(individual_data->data);
-    } else if (idata_unit->interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_OBJECT) {
-        e2e_object_data_t *object_data = &idata_unit->values.object;
-
-        free((char *) object_data->path);
-        free(object_data->object_bytes.buf);
-        astarte_object_entries_destroy_deserialized(
-            object_data->entries.buf, object_data->entries.len);
-    } else {
-        CHECK_HALT(true, "Unkown interface type");
+void free_property(e2e_property_data_t property) {
+    // unsets do not store an individual value
+    if (!property.unset) {
+        astarte_data_destroy_deserialized(property.data);
     }
 
-    sys_dlist_remove(&idata_unit->node);
-    free(idata_unit);
-    return 0;
+    free((char *) property.path);
 }
 
 void idata_free()
 {
-    free(idata.iface_map.config);
+    sys_hashmap_clear(&idata.iface_map, free_map_entry_callback, NULL);
+
+    free((void *) idata.iface_map.config);
     free(idata.iface_map.data);
 }
 
@@ -319,22 +256,51 @@ void idata_free()
  * Static functions definitions
  ***********************************************/
 
+static void free_map_entry_callback(uint64_t key, uint64_t value, void *user_data) {
+    ARG_UNUSED(key);
+    ARG_UNUSED(user_data);
+
+    // NOLINTNEXTLINE
+    idata_map_value_t *data_value = UINT_TO_POINTER(value);
+        
+    if (data_value->interface->type == ASTARTE_INTERFACE_TYPE_PROPERTIES) {
+        e2e_property_data_t property = {};
+        while(idata_pop_property(data_value->interface, &property) == 0) {
+            free_property(property);
+        }
+    }
+    else if (data_value->interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_OBJECT) {
+        e2e_object_data_t object = {};
+        while(idata_pop_object(data_value->interface, &object) == 0) {
+            free_object(object);
+        }
+    }
+    else if (data_value->interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL) {
+        e2e_individual_data_t individual = {};
+        while(idata_pop_individual(data_value->interface, &individual) == 0) {
+            free_individual(individual);
+        }
+    }
+}
+
 static uint64_t idata_hash_intf(const astarte_interface_t *interface) {
     return idata_hash_name(interface->name, strlen(interface->name));
 }
 
 static uint64_t idata_hash_name(const char *interface_name, size_t len) {
-    return idata->hash_fn(interface_name, strlen(interface_name));
+    return idata.hash_fn(interface_name, len);
 }
 
-static void idata_init_interface(struct sys_hashmap *interface_map, const astarte_interface_t *interface)
-{
+static bool map_get(const astarte_interface_t *interface, idata_map_value_t **out_value) {
     uint64_t key = idata_hash_intf(interface);
-    idata_map_value_t value = (idata_map_value_t) {
-        .interface = interface,
-        .expected = SPSC_INITIALIZER(ARRAY_SIZE(value.expected_buf), value.expected_buf),
-        .expected_buf = { 0 },
-    };
+    uint64_t value = { 0 };
+    
+    if (!sys_hashmap_get(&idata.iface_map, key, &value)) {
+        return false;
+    }
 
-    sys_hashmap_insert(&idata->iface_map, key, value, NULL);
+    // NOLINTNEXTLINE
+    *out_value = UINT_TO_POINTER(value);
+
+    return true;
 }

@@ -2,22 +2,30 @@
 
 #include <zephyr/sys/atomic.h>
 
+#include "utils.h"
+#include "astarte_device_sdk/device.h"
 #include "utilities.h"
+#include "zephyr/kernel.h"
+
+#define CHECK_INITIALIZED ;
 
 K_THREAD_STACK_DEFINE(device_thread_stack_area, CONFIG_DEVICE_THREAD_STACK_SIZE);
 static struct k_thread device_thread_data;
 
 static astarte_device_handle_t device_handle;
-K_SEM_DEFINE(device_semaphore, 1, 1);
+K_MUTEX_DEFINE(device_mutex);
 
 enum e2e_thread_flags
 {
-    DEVICE_CONNECTED_FLAG = 0,
-    THREAD_TERMINATION_FLAG,
+    DEVICE_INITIALIZED = 0,
+    DEVICE_CONNECTED,
+    THREAD_TERMINATION,
 };
 static atomic_t device_thread_flags;
 
-LOG_MODULE_REGISTER(runner, CONFIG_RUNNER_LOG_LEVEL); // NOLINT
+LOG_MODULE_REGISTER(runner, CONFIG_DEVICE_HANDLER_LOG_LEVEL); // NOLINT
+
+static bool get_termination();
 
 static void device_thread_entry_point(void *device_handle, void *unused1, void *unused2)
 {
@@ -48,20 +56,35 @@ static void device_thread_entry_point(void *device_handle, void *unused1, void *
         astarte_device_destroy(device_handle), "Astarte device destruction failure.");
 
     // allow creating another device with `device_setup`
-    k_sem_give(&device_semaphore);
+    CHECK_HALT(
+        k_mutex_lock(&device_mutex, K_FOREVER) != 0, "Could not lock device mutex for initialization");
+    atomic_clear_bit(&device_thread_flags, DEVICE_INITIALIZED);
+    device_handle = NULL;
+    k_mutex_unlock(&device_mutex);
 
     LOG_INF("Exiting from the polling thread."); // NOLINT
 }
 
 void device_setup(astarte_device_config_t config)
 {
-    LOG_INF("Creating static astarte_device by calling astarte_device_new."); // NOLINT
-    CHECK_ASTARTE_OK_HALT(
-        astarte_device_new(&config, &device_handle), "Astarte device creation failure.");
+    astarte_device_handle_t temp_handle = NULL;
 
     // lock the device until it exits the thread and disconnects
     CHECK_HALT(
-        k_sem_take(&device_semaphore, K_FOREVER) != 0, "Could not take the device semaphore");
+        k_mutex_lock(&device_mutex, K_FOREVER) != 0, "Could not lock device mutex for initialization");
+    if (!atomic_test_and_set_bit(&device_thread_flags, DEVICE_INITIALIZED)) {
+        LOG_INF("Creating static astarte_device by calling astarte_device_new."); // NOLINT
+        CHECK_ASTARTE_OK_HALT(
+            astarte_device_new(&config, &temp_handle), "Astarte device creation failure.");
+    }
+    else {
+        // if the device was already initialized
+        // in this else path we do not need to unlock since we are halting execution
+        LOG_ERR("The device is already initialized"); // NOLINT
+        k_fatal_halt(-1);
+    }
+    device_handle = temp_handle;
+    k_mutex_unlock(&device_mutex);
 
     LOG_INF("Spawning a new thread to poll data from the Astarte device."); // NOLINT
     k_thread_create(&device_thread_data, device_thread_stack_area,
@@ -70,19 +93,15 @@ void device_setup(astarte_device_config_t config)
 }
 
 void set_connected() {
-    atomic_set_bit(&device_thread_flags, DEVICE_CONNECTED_FLAG);
+    atomic_set_bit(&device_thread_flags, DEVICE_CONNECTED);
 }
 
 void set_disconnected() {
-    atomic_clear_bit(&device_thread_flags, DEVICE_CONNECTED_FLAG);
+    atomic_clear_bit(&device_thread_flags, DEVICE_CONNECTED);
 }
 
 void set_termination() {
-    atomic_set_bit(&device_thread_flags, THREAD_TERMINATION_FLAG);
-}
-
-bool get_termination() {
-    return atomic_test_bit(&device_thread_flags, THREAD_TERMINATION_FLAG);
+    atomic_set_bit(&device_thread_flags, THREAD_TERMINATION);
 }
 
 void wait_for_destroyed_device() {
@@ -96,14 +115,18 @@ void wait_for_destroyed_device() {
 
 void wait_for_connection()
 {
-    while (!atomic_test_bit(&device_thread_flags, DEVICE_CONNECTED_FLAG)) {
+    while (!atomic_test_bit(&device_thread_flags, DEVICE_CONNECTED)) {
         k_sleep(K_MSEC(MAIN_THREAD_SLEEP_MS));
     }
 }
 
 void wait_for_disconnection()
 {
-    while (atomic_test_bit(&device_thread_flags, DEVICE_CONNECTED_FLAG)) {
+    while (atomic_test_bit(&device_thread_flags, DEVICE_CONNECTED)) {
         k_sleep(K_MSEC(MAIN_THREAD_SLEEP_MS));
     }
+}
+
+static bool get_termination() {
+    return atomic_test_bit(&device_thread_flags, THREAD_TERMINATION);
 }
