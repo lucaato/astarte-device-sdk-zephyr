@@ -7,8 +7,6 @@
 #include "utilities.h"
 #include "zephyr/kernel.h"
 
-#define CHECK_INITIALIZED ;
-
 K_THREAD_STACK_DEFINE(device_thread_stack_area, CONFIG_DEVICE_THREAD_STACK_SIZE);
 static struct k_thread device_thread_data;
 

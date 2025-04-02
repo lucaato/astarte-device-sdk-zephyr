@@ -142,10 +142,10 @@ static uint64_t interfaces_perfect_hash(const char* key_string, size_t len);
 void run_e2e_test()
 {
     LOG_INF("Running e2e test"); // NOLINT
-    // initialize idata, no need to lock since no shell is active currenlty
+    // initialize idata
     // NOTE the order matters, we must initialize idata before the shell is started
     // since it could use idata to store expected messages
-    idata_init(interfaces, ARRAY_SIZE(interfaces), interfaces_perfect_hash);
+    idata_handle_t idata = idata_init(interfaces, ARRAY_SIZE(interfaces), interfaces_perfect_hash);
     // sets up the global device_handle
     astarte_device_config_t config = {
         .device_id = CONFIG_DEVICE_ID,
@@ -179,7 +179,11 @@ void run_e2e_test()
     shell_print(uart_shell, "Disconnected, closing shell...");
     shell_stop(uart_shell);
 
-    idata_free();
+    idata_free(idata);
+}
+
+idata_handle_t get_current_idata_handle() {
+    
 }
 
 /************************************************
