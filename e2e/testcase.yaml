@@ -10,8 +10,6 @@ tests:
       - arch:posix:CONFIG_NATIVE_UART_0_ON_STDINOUT=y
     harness_config:
       pytest_dut_scope: "session"
-      record:
-        regex: "\\[(?P<timestamp>.*)\\] \\<(?P<log_level>.*)\\> (?P<module>.*)\\: (?P<message>.*)"
       pytest_args:
         - "--color=yes"
         - "-rA"

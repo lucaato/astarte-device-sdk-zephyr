@@ -43,7 +43,6 @@ def get_server_data(
         url += path
 
     headers = {"Authorization": "Bearer " + test_cfg.appengine_token}
-    log.inf(f"Sending HTTP GET request: {url}")
 
     params: dict[str, str] = {}
 
@@ -88,7 +87,6 @@ def post_server_data(
         "Authorization": "Bearer " + test_cfg.appengine_token,
         "Content-Type": "application/json",
     }
-    log.inf(f"Sending HTTP POST request: {url}\n{headers}\n{json_data}")
     res = requests.post(
         url=url, data=json_data, headers=headers, timeout=5, verify=test_cfg.appengine_cert
     )
@@ -116,7 +114,6 @@ def unset_server_property(test_cfg: CfgValues, interface: str, endpoint: str, qu
         "Authorization": "Bearer " + test_cfg.appengine_token,
         "Content-Type": "application/json",
     }
-    log.inf(f"Sending HTTP DELETE request: {url}")
     res = requests.delete(url, headers=headers, timeout=5, verify=test_cfg.appengine_cert)
     if res.status_code != 204:
         if not quiet:

@@ -25,75 +25,68 @@ class Property:
         self.value = value
 
 
-class PropertySet(InterfaceData):
+class PropertySet(InterfaceData[Property]):
     def __init__(self, interface: str, ownership: Ownership, properties: list[Property]):
         super().__init__(interface, ownership)
         self.properties = properties
 
-    def _send_server_data(self, helper: TestcaseHelper):
-        for prop in self.properties:
-            value = prepare_transmit_data(prop.path.split("/")[-1], prop.value)
-            post_server_data(helper.astarte_cfg, self.interface, prop.path, value)
+    def _send_server_data(self, helper: TestcaseHelper, data: Property):
+        value = prepare_transmit_data(data.path.split("/")[-1], data.value)
+        post_server_data(helper.astarte_cfg, self.interface, data.path, value)
 
-    def _check_server_received_data(self, helper: TestcaseHelper, send_start: datetime):
+    def _check_server_received_data(self, helper: TestcaseHelper, send_start: datetime, data: Property):
         received_data = get_server_data(helper.astarte_cfg, self.interface)
         log.inf(f"Server property data {received_data}")
 
         # Retrieve and check properties
-        for prop in self.properties:
-            parameter = prop.path.split("/")[1]
-            last_path_segment = prop.path.split("/")[-1]
-            expected_value = prop.value
-            got_value = decode_value(received_data[parameter][last_path_segment], last_path_segment)
+        parameter = data.path.split("/")[1]
+        last_path_segment = data.path.split("/")[-1]
+        expected_value = data.value
+        got_value = decode_value(received_data[parameter][last_path_segment], last_path_segment)
 
-            if not compare_data(got_value, expected_value):
-                log.err(
-                    f"Mismatch for {last_path_segment}: expected {expected_value} got {got_value}"
-                )
-                raise ValueError(f"Mismatch for {last_path_segment}")
+        if not compare_data(got_value, expected_value):
+            log.err(
+                f"Mismatch for {last_path_segment}: expected {expected_value} got {got_value}"
+            )
+            raise ValueError(f"Mismatch for {last_path_segment}")
 
-    def _get_device_shell_commands(self, base_command: str) -> list[str]:
-        result = []
+    def _get_device_shell_commands(self, base_command: str, data: Property) -> str:
+        path = data.path
+        bson_base64 = encode_shell_bson(data.value)
+        return f"{base_command} property set {self.interface} {path} {bson_base64}"
 
-        for prop in self.properties:
-            path = prop.path
-            bson_base64 = encode_shell_bson(prop.value)
-            result.append(f"{base_command} property set {self.interface} {path} {bson_base64}")
-
-        return result
+    def _get_single_send_elements(self) -> list[Property]:
+        return self.properties
+    
 
 
-class PropertyUnset(InterfaceData):
+class PropertyUnset(InterfaceData[str]):
     def __init__(self, interface: str, ownership: Ownership, unset: list[str]):
         super().__init__(interface, ownership)
         self.unset = unset
 
-    def _send_server_data(self, helper: TestcaseHelper):
-        for prop in self.unset:
-            unset_server_property(helper.astarte_cfg, self.interface, prop)
+    def _send_server_data(self, helper: TestcaseHelper, data: str):
+        unset_server_property(helper.astarte_cfg, self.interface, data)
 
-    def _check_server_received_data(self, helper: TestcaseHelper, send_start: datetime):
+    def _check_server_received_data(self, helper: TestcaseHelper, send_start: datetime, data: str):
         received_data = get_server_data(helper.astarte_cfg, self.interface)
         log.inf(f"Server property unset data {received_data}")
 
-        for prop in self.unset:
-            paramter = prop.split("/")[1]
-            endpoint = prop.split("/")[-1]
-            try:
-                parameter_object = received_data[paramter][endpoint]
-                got_value = decode_value(parameter_object, endpoint)
-            except KeyError as e:
-                log.inf(f"The key is not accessible as expected: {e}")
-                # handled because completety unset interfaces do not return anything
-                got_value = {}
+        paramter = data.split("/")[1]
+        endpoint = data.split("/")[-1]
+        try:
+            parameter_object = received_data[paramter][endpoint]
+            got_value = decode_value(parameter_object, endpoint)
+        except KeyError as e:
+            log.inf(f"The key is not accessible as expected: {e}")
+            # handled because completety unset interfaces do not return anything
+            got_value = {}
 
-            if got_value != {}:
-                raise ValueError("Incorrect data stored on server")
+        if got_value != {}:
+            raise ValueError("Incorrect data stored on server")
 
-    def _get_device_shell_commands(self, base_command: str) -> list[str]:
-        result = []
+    def _get_device_shell_commands(self, base_command: str, data: str) -> str:
+        return f"{base_command} property unset {self.interface} {data}"
 
-        for path in self.unset:
-            result.append(f"{base_command} property unset {self.interface} {path}")
-
-        return result
+    def _get_single_send_elements(self) -> list[str]:
+        return self.unset

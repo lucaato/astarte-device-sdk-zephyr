@@ -266,7 +266,7 @@ static uint64_t interfaces_perfect_hash(const char* key_string, size_t len) {
     // - ServerDatastream
     // - DeviceDatastream
     // hence the names are uniquely identified by the first letter and the seventh after the
-    // reverse domain notation of the interfaces
+    // reverse domain notation base of the interfaces (`interfaace_dname`)
     CHECK_HALT(strstr(key_string, interface_dname) != key_string || len <= 44,
         "Received an invalid or unexpected interface name, please update the hash function");
 
