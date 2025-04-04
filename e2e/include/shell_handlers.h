@@ -17,11 +17,18 @@
 
 #include <zephyr/shell/shell.h>
 
+#include <astarte_device_sdk/device.h>
+
+#include "idata.h"
+
+// NOTE should be called before everything else
+void init_shell(astarte_device_handle_t device, idata_handle_t idata);
+
 int cmd_expect_object_handler(const struct shell *shell, size_t argc, char **argv);
 int cmd_expect_individual_handler(const struct shell *shell, size_t argc, char **argv);
 int cmd_expect_property_set_handler(const struct shell *shell, size_t argc, char **argv);
 int cmd_expect_property_unset_handler(const struct shell *shell, size_t argc, char **argv);
-int cmd_expect_verify_handler(const struct shell *shell, size_t argc, char **argv);
+//int cmd_expect_verify_handler(const struct shell *shell, size_t argc, char **argv);
 
 int cmd_send_individual_handler(const struct shell *shell, size_t argc, char **argv);
 int cmd_send_object_handler(const struct shell *shell, size_t argc, char **argv);
@@ -31,4 +38,3 @@ int cmd_send_property_unset_handler(const struct shell *shell, size_t argc, char
 int cmd_disconnect(const struct shell *shell, size_t argc, char **argv);
 
 #endif /* E2ESHELL_HANDLERS_H */
-

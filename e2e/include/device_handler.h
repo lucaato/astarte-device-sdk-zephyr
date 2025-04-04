@@ -9,27 +9,25 @@
 
 /**
  * @file device_handler.h
- * @brief Handle device object and threads
+ * @brief Handle device object and threads, these function should be called by one thread only
  */
 
+#include "zephyr/device.h"
 #include <astarte_device_sdk/device.h>
 
-#define MAIN_THREAD_SLEEP_MS 500
+// Used only as a token to avoid
+typedef void *test_device_handle_t;
 
 void device_setup(astarte_device_config_t config);
+astarte_device_handle_t get_device();
 // these functions read device_thread_flags and wait appropriately
-// flag DEVICE_CONNECTED_FLAG
+// flag DEVICE_CONNECTED
 void wait_for_connection();
 void wait_for_disconnection();
-// flag THREAD_TERMINATION_FLAG
-void wait_for_destroyed_device();
-// --
 // these functions write device_thread_flags
-// flag DEVICE_CONNECTED_FLAG
-void set_connected();
-void set_disconnected();
-// flag THREAD_TERMINATION_FLAG
+// flag THREAD_TERMINATION
 void set_termination();
+void free_device();
 // --
 
 #endif /* E2ESHELL_HANDLERS_H */

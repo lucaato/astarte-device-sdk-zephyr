@@ -26,9 +26,6 @@
 #include <astarte_device_sdk/pairing.h>
 #include <astarte_device_sdk/result.h>
 #include <astarte_device_sdk/util.h>
-#include <data_private.h>
-#include <interface_private.h>
-#include <object_private.h>
 
 #include "device_handler.h"
 #include "idata.h"
@@ -36,7 +33,6 @@
 #include "utilities.h"
 
 #include "astarte_generated_interfaces.h"
-#include "utils.h"
 
 /************************************************
  * Shell commands declaration
@@ -63,8 +59,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(expect_subcommand,
         " This command expects <interface_name> <path> <bson_value> <optional_timestamp>",
         cmd_expect_object_handler, 4, 1),
     SHELL_CMD(property, &expect_property_subcommand, "Expect a property.", NULL),
-    SHELL_CMD(verify, NULL, "Check that all the expected messages got received.",
-        cmd_expect_verify_handler),
+    //SHELL_CMD(verify, NULL, "Check that all the expected messages got received.",
+    //    cmd_expect_verify_handler),
     SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(send_property_subcommand,
@@ -117,9 +113,6 @@ const astarte_interface_t *interfaces[] = {
  * Static functions declaration
  ***********************************************/
 
-static void device_thread_entry_point(void *device_handle, void *unused1, void *unused2);
-static void connection_callback(astarte_device_connection_event_t event);
-static void disconnection_callback(astarte_device_disconnection_event_t event);
 // device data callbacks
 static void device_individual_callback(astarte_device_datastream_individual_event_t event);
 static void device_object_callback(astarte_device_datastream_object_event_t event);
@@ -138,13 +131,10 @@ static uint64_t interfaces_perfect_hash(const char* key_string, size_t len);
  * Global functions definition
  ***********************************************/
 
-// guarded by the semaphore e2e_run_semaphore
 void run_e2e_test()
 {
     LOG_INF("Running e2e test"); // NOLINT
-    // initialize idata
-    // NOTE the order matters, we must initialize idata before the shell is started
-    // since it could use idata to store expected messages
+    // NOTE the order matters, we must initialize idata and device before the shell is started
     idata_handle_t idata = idata_init(interfaces, ARRAY_SIZE(interfaces), interfaces_perfect_hash);
     // sets up the global device_handle
     astarte_device_config_t config = {
@@ -155,14 +145,16 @@ void run_e2e_test()
         .http_timeout_ms = CONFIG_HTTP_TIMEOUT_MS,
         .mqtt_connection_timeout_ms = CONFIG_MQTT_CONNECTION_TIMEOUT_MS,
         .mqtt_poll_timeout_ms = CONFIG_MQTT_POLL_TIMEOUT_MS,
+        .cbk_user_data = idata,
         .datastream_individual_cbk = device_individual_callback,
         .datastream_object_cbk = device_object_callback,
         .property_set_cbk = device_property_set_callback,
         .property_unset_cbk = device_property_unset_callback,
-        .connection_cbk = connection_callback,
-        .disconnection_cbk = disconnection_callback,
     };
+    // NOTE the order matters, we must initialize idata and device before the shell is started
     device_setup(config);
+    // NOTE then we pass it to the shell handlers called before `shell_start`
+    init_shell(get_device(), idata);
 
     // wait while device connects
     wait_for_connection();
@@ -172,18 +164,15 @@ void run_e2e_test()
     shell_start(uart_shell);
     shell_print(uart_shell, "Device shell ready");
 
-    // the disconnection happens when the "disconnect" shell command gets called
-    // afterwards the device is deleted
-    wait_for_destroyed_device();
+    // wait until a command disconnects the device
+    wait_for_disconnection();
 
+    // NOTE we also free the device and idata after `shell_stop`
     shell_print(uart_shell, "Disconnected, closing shell...");
     shell_stop(uart_shell);
 
+    free_device();
     idata_free(idata);
-}
-
-idata_handle_t get_current_idata_handle() {
-    
 }
 
 /************************************************
@@ -193,190 +182,74 @@ idata_handle_t get_current_idata_handle() {
 static void device_individual_callback(astarte_device_datastream_individual_event_t event)
 {
     LOG_INF("Individual datastream callback");
-
-    e2e_individual_data_t expected = { 0 };
-    const astarte_interface_t *interface = idata_get_interface(event.base_event.interface_name);
+    idata_handle_t idata = event.base_event.user_data;
+    const astarte_interface_t *interface = idata_get_interface(idata, event.base_event.interface_name);
     CHECK_HALT(interface == NULL, "The interface name received as event does not match any interface");
 
-    // get next expected element
-    // TODO it makes sense to fail here if we can signal it immediately to pytest
-    // otherwise increment unexpected counter
-    // if we increment the counter we probably need to lock, even if the callbacks should be only called by one thread
-    // we can probably just CHECK_HALT here and that should make the e2e fail
-    if (idata_pop_individual(interface, &expected) != 0) {
-        // inc        
-        //unexpected_data_count += 1;
-    }
+    e2e_individual_data_t expected = { 0 };
+    CHECK_HALT(idata_pop_individual(idata, interface, &expected) != 0, "No more expected data");
 
-    LOG_DBG("Comparing values");
-    LOG_DBG("Expected:");
-    utils_log_astarte_data(expected.data);
-    LOG_DBG("Received:");
-    utils_log_astarte_data(event.data);
+    CHECK_HALT(strcmp(expected.path, event.base_event.path) != 0, "Received path does not match expected one");
+    CHECK_HALT(!astarte_data_equal(&expected.data, &event.data), "Unexpected element received");
 
-    if (!astarte_data_equal(&expected.data, &event.data)) {
-        LOG_ERR("Unexpected element received on '%s' path '%s'", interface->name, expected.path);
-        // TODO // unexpected_data_count += 1;
-    }
-
-    LOG_INF("Received expected value on '%s' '%s'", interface->name,
-        expected.path);
-    // TODO increment expected count ?
+    LOG_INF("Individual received matched expected one");
 }
 
 static void device_object_callback(astarte_device_datastream_object_event_t event)
 {
     LOG_INF("Object datastream callback");
 
-    CHECK_HALT(
-        k_mutex_lock(&expected_data_mutex, K_FOREVER) != 0, "Could not lock expected data mutex");
-    if (idata_is_empty(&expected_data)) {
-        LOG_INF("Idata is empty not performing any check");
-        goto unlock;
-    }
-
+    idata_handle_t idata = event.base_event.user_data;
     e2e_object_entry_array_t received = {
         .buf = event.entries,
         .len = event.entries_len,
     };
+    const astarte_interface_t *interface = idata_get_interface(idata, event.base_event.interface_name);
+    CHECK_HALT(interface == NULL, "The interface name received as event does not match any interface");
 
-    e2e_object_data_t *object = NULL;
-    // inizialization
-    idata_get_object(&expected_data, event.base_event.interface_name, &object);
+    e2e_object_data_t expected = {};
+    CHECK_HALT(idata_pop_object(idata, interface, &expected) != 0, "No more expected data");
 
-    for (; object != NULL;
-        idata_get_object(&expected_data, event.base_event.interface_name, &object)) {
-        if (strcmp(object->path, event.base_event.path) != 0) {
-            // skip element if on a different path
-            continue;
-        }
+    CHECK_HALT(strcmp(expected.path, event.base_event.path) != 0, "Received path does not match expected one");
+    CHECK_HALT(!astarte_object_equal(&expected.entries, &received), "Unexpected element received");
 
-        if (!astarte_object_equal(&object->entries, &received)) {
-            LOG_ERR("Unexpected element received on path '%s'", object->path);
-            unexpected_data_count += 1;
-            goto unlock;
-        }
-
-        LOG_INF(
-            "Received expected value on '%s' '%s'", event.base_event.interface_name, object->path);
-
-        expected_data_count += 1;
-        idata_remove_object(object);
-
-        goto unlock;
-    }
-
-    LOG_ERR(
-        "No more expected objects but got data on interface '%s'", event.base_event.interface_name);
-
-unlock:
-    k_mutex_unlock(&expected_data_mutex);
+    LOG_INF("Object received matched expected one");
 }
 
 static void device_property_set_callback(astarte_device_property_set_event_t event)
 {
     LOG_INF("Property set callback");
 
-    CHECK_HALT(
-        k_mutex_lock(&expected_data_mutex, K_FOREVER) != 0, "Could not lock expected data mutex");
-    if (idata_is_empty(&expected_data)) {
-        LOG_INF("Idata is empty not performing any check");
-        goto unlock;
-    }
+    idata_handle_t idata = event.base_event.user_data;
+    const astarte_interface_t *interface = idata_get_interface(idata, event.base_event.interface_name);
+    CHECK_HALT(interface == NULL, "The interface name received as event does not match any interface");
 
-    e2e_property_data_t *property = NULL;
+    e2e_property_data_t expected = { 0 };
     // inizialization
-    idata_get_property(&expected_data, event.base_event.interface_name, &property);
+    CHECK_HALT(idata_pop_property(idata, interface, &expected), "No more expected data");
 
-    for (; property != NULL;
-        idata_get_property(&expected_data, event.base_event.interface_name, &property)) {
-        if (strcmp(property->path, event.base_event.path) != 0) {
-            // skip element if on a different path
-            continue;
-        }
+    CHECK_HALT(strcmp(expected.path, event.base_event.path) != 0, "Received path does not match expected one");
+    CHECK_HALT(!astarte_data_equal(&expected.data, &event.data), "Unexpected element received");
 
-        LOG_DBG("Comparing values\nExpected:");
-        utils_log_astarte_data(property->data);
-        LOG_DBG("Received:");
-        utils_log_astarte_data(event.data);
-
-        if (!astarte_data_equal(&property->data, &event.data)) {
-            LOG_ERR("Unexpected element received on path '%s'", property->path);
-            unexpected_data_count += 1;
-            goto unlock;
-        }
-
-        LOG_INF("Received expected value on '%s' '%s'", event.base_event.interface_name,
-            property->path);
-
-        utils_log_astarte_data(event.data);
-
-        expected_data_count += 1;
-        idata_remove_property(property);
-
-        goto unlock;
-    }
-
-    LOG_ERR("No more expected properties but got data on interface '%s'",
-        event.base_event.interface_name);
-
-unlock:
-    k_mutex_unlock(&expected_data_mutex);
+    LOG_INF("Property received matched expected one");
 }
 
 static void device_property_unset_callback(astarte_device_data_event_t event)
 {
     LOG_INF("Property unset callback");
 
-    CHECK_HALT(
-        k_mutex_lock(&expected_data_mutex, K_FOREVER) != 0, "Could not lock expected data mutex");
-    if (idata_is_empty(&expected_data)) {
-        LOG_INF("Idata is empty not performing any check");
-        goto unlock;
-    }
+    idata_handle_t idata = event.user_data;
+    const astarte_interface_t *interface = idata_get_interface(idata, event.interface_name);
+    CHECK_HALT(interface == NULL, "The interface name received as event does not match any interface");
 
-    e2e_property_data_t *property = NULL;
+    e2e_property_data_t expected = { 0 };
     // inizialization
-    idata_get_property(&expected_data, event.interface_name, &property);
+    CHECK_HALT(idata_pop_property(idata, interface, &expected), "No more expected data");
 
-    for (; property != NULL; idata_get_property(&expected_data, event.interface_name, &property)) {
-        if (strcmp(property->path, event.path) != 0) {
-            // skip element if on a different path
-            continue;
-        }
+    CHECK_HALT(strcmp(expected.path, event.path) != 0, "Received path does not match expected one");
+    CHECK_HALT(!expected.unset, "Unexpected unset received");
 
-        if (!property->unset) {
-            LOG_ERR("Unexpected unset received on path '%s'", property->path);
-            unexpected_data_count += 1;
-            goto unlock;
-        }
-
-        LOG_INF("Received expected unset on '%s' '%s'", event.interface_name, property->path);
-
-        expected_data_count += 1;
-        idata_remove_property(property);
-
-        goto unlock;
-    }
-
-    LOG_ERR("No more expected unsets but got data on interface '%s'", event.interface_name);
-
-unlock:
-    k_mutex_unlock(&expected_data_mutex);
-}
-
-static void connection_callback(astarte_device_connection_event_t event)
-{
-    (void) event;
-    LOG_INF("Astarte device connected"); // NOLINT
-    set_connected();
-}
-
-static void disconnection_callback(astarte_device_disconnection_event_t event)
-{
-    (void) event;
-    LOG_INF("Astarte device disconnected"); // NOLINT
-    set_disconnected();
+    LOG_INF("Expected property unset received");
 }
 
 static uint64_t interfaces_perfect_hash(const char* key_string, size_t len) {
@@ -385,7 +258,16 @@ static uint64_t interfaces_perfect_hash(const char* key_string, size_t len) {
     const size_t interface_dname_type_idetifier = 43;
 
     // check that the string is a known interface name and has enough characters for our check
-    CHECK_HALT(strstr(key_string, interface_dname) == key_string && len > 44,
+    // NOTE this depends completely on the names used in this case this works because we have names
+    // - ServerProperty
+    // - DeviceProperty
+    // - ServerAggregate
+    // - DeviceAggregate
+    // - ServerDatastream
+    // - DeviceDatastream
+    // hence the names are uniquely identified by the first letter and the seventh after the
+    // reverse domain notation of the interfaces
+    CHECK_HALT(strstr(key_string, interface_dname) != key_string || len <= 44,
         "Received an invalid or unexpected interface name, please update the hash function");
 
     uint32_t result = { 0 };

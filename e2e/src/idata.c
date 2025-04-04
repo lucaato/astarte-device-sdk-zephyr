@@ -54,7 +54,7 @@ idata_handle_t idata_init(const astarte_interface_t *interfaces[], size_t interf
 {
     struct sys_hashmap_config *hashmap_config = malloc(sizeof(struct sys_hashmap_config));
     CHECK_HALT(!hashmap_config, "Could not allocate map required memory");
-    *hashmap_config = SYS_HASHMAP_CONFIG(SIZE_MAX, SYS_HASHMAP_DEFAULT_LOAD_FACTOR);
+    *hashmap_config = (struct sys_hashmap_config) SYS_HASHMAP_CONFIG(SIZE_MAX, SYS_HASHMAP_DEFAULT_LOAD_FACTOR);
 
     struct sys_hashmap_data *hashmap_data = calloc(1, sizeof(struct sys_hashmap_data));
     CHECK_HALT(!hashmap_data, "Could not allocate map required memory");

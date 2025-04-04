@@ -7,10 +7,6 @@
 #ifndef E2ERUNNER_H
 #define E2ERUNNER_H
 
-#include "idata.h"
-
-idata_handle_t get_current_idata_handle();
-
 // run the e2e test on all test devices
 // must be called only once, it takes ownership of a semaphore so it will block until the first call
 // exits
