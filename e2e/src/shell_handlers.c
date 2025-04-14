@@ -6,6 +6,8 @@
 
 #include "shell_handlers.h"
 
+#include <zephyr/sys/base64.h>
+
 #include <astarte_device_sdk/device.h>
 #include <astarte_device_sdk/interface.h>
 #include <data_private.h>
@@ -18,14 +20,23 @@
 
 LOG_MODULE_REGISTER(shell_handlers, CONFIG_SHELL_HANDLERS_LOG_LEVEL); // NOLINT
 
+// NOLINTNEXTLINE
 static idata_handle_t idata;
+// NOLINTNEXTLINE
 static astarte_device_handle_t device;
 
-static const astarte_interface_t *next_interface_parameter(char ***args, size_t *argc);
 static int parse_alloc_astarte_invividual(const astarte_interface_t *interface, char *path,
-    e2e_byte_array *buf, astarte_data_t *out_data);
+    idata_byte_array *buf, astarte_data_t *out_data);
 static int parse_alloc_astarte_object(const astarte_interface_t *interface, char *path,
-    e2e_byte_array *buf, astarte_object_entry_t **entries, size_t *entries_length);
+    idata_byte_array *buf, astarte_object_entry_t **entries, size_t *entries_length);
+
+static const astarte_interface_t *next_interface_parameter(char ***args, size_t *argc);
+static void skip_parameter(char ***args, size_t *argc);
+static idata_timestamp_option_t next_timestamp_parameter(char ***args, size_t *argc);
+// the return of this function needs to be deallocated
+static char *next_alloc_string_parameter(char ***args, size_t *argc);
+// the return of this function needs to be deallocated
+static idata_byte_array next_alloc_base64_parameter(char ***args, size_t *argc);
 
 void init_shell(astarte_device_handle_t device_new, idata_handle_t idata_new)
 {
@@ -39,7 +50,7 @@ int cmd_expect_individual_handler(const struct shell *sh, size_t argc, char **ar
     LOG_INF("Expect individual command handler"); // NOLINT
 
     char *path = NULL;
-    e2e_byte_array individual_value = { 0 };
+    idata_byte_array individual_value = { 0 };
     astarte_data_t data = { 0 };
     // the first parameter is the command name
     skip_parameter(&argv, &argc);
@@ -49,14 +60,14 @@ int cmd_expect_individual_handler(const struct shell *sh, size_t argc, char **ar
     CHECK_GOTO(!path, cleanup, "Invalid path parameter passed");
     individual_value = next_alloc_base64_parameter(&argv, &argc);
     CHECK_GOTO(individual_value.len == 0, cleanup, "Invalid individual parameter passed");
-    e2e_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
+    idata_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
 
     CHECK_GOTO(parse_alloc_astarte_invividual(interface, path, &individual_value, &data) != 0,
         cleanup, "Could not parse and allocate astarte individual");
 
     // path and individual will be freed by the idata_unit free function
     CHECK_GOTO(idata_add_individual(idata, interface,
-                   (e2e_individual_data_t) {
+                   (idata_individual_t) {
                        .data = data,
                        .path = path,
                        .timestamp = timestamp,
@@ -81,7 +92,7 @@ int cmd_expect_object_handler(const struct shell *sh, size_t argc, char **argv)
     LOG_INF("Expect object command handler"); // NOLINT
 
     char *path = NULL;
-    e2e_byte_array object_bytes = { 0 };
+    idata_byte_array object_bytes = { 0 };
     astarte_object_entry_t *entries = { 0 };
     size_t entries_length = { 0 };
     skip_parameter(&argv, &argc);
@@ -91,14 +102,14 @@ int cmd_expect_object_handler(const struct shell *sh, size_t argc, char **argv)
     CHECK_GOTO(!path, cleanup, "Invalid path parameter passed");
     object_bytes = next_alloc_base64_parameter(&argv, &argc);
     CHECK_GOTO(object_bytes.len == 0, cleanup, "Invalid object parameter passed");
-    e2e_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
+    idata_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
 
     CHECK_GOTO(
         parse_alloc_astarte_object(interface, path, &object_bytes, &entries, &entries_length) != 0,
         cleanup, "Could not parse and allocate astarte object entries");
 
     // path, object_bytes and object_entries will be freed by the idata_unit free function
-    CHECK_GOTO(idata_add_object(idata, interface, (e2e_object_data_t) {
+    CHECK_GOTO(idata_add_object(idata, interface, (idata_object_t) {
              .entries = {
                  .buf = entries,
                  .len = entries_length,
@@ -123,7 +134,7 @@ int cmd_expect_property_set_handler(const struct shell *sh, size_t argc, char **
     LOG_INF("Expect set property command handler"); // NOLINT
 
     char *path = NULL;
-    e2e_byte_array property_value = { 0 };
+    idata_byte_array property_value = { 0 };
     astarte_data_t data = { 0 };
 
     skip_parameter(&argv, &argc);
@@ -139,7 +150,7 @@ int cmd_expect_property_set_handler(const struct shell *sh, size_t argc, char **
 
     // path and data will be freed by the idata_unit free function
     CHECK_GOTO(idata_add_property(idata, interface,
-                   (e2e_property_data_t) {
+                   (idata_property_t) {
                        .data = data,
                        .path = path,
                    })
@@ -170,7 +181,7 @@ int cmd_expect_property_unset_handler(const struct shell *sh, size_t argc, char 
     CHECK_GOTO(!path, cleanup, "Invalid path parameter passed");
 
     CHECK_GOTO(idata_add_property(idata, interface,
-                   (e2e_property_data_t) {
+                   (idata_property_t) {
                        .path = path,
                        .unset = true,
                    })
@@ -192,7 +203,7 @@ int cmd_send_individual_handler(const struct shell *sh, size_t argc, char **argv
     int return_code = 1;
 
     char *path = NULL;
-    e2e_byte_array individual_value = { 0 };
+    idata_byte_array individual_value = { 0 };
     astarte_data_t data = { 0 };
     skip_parameter(&argv, &argc);
     const astarte_interface_t *interface = next_interface_parameter(&argv, &argc);
@@ -201,7 +212,7 @@ int cmd_send_individual_handler(const struct shell *sh, size_t argc, char **argv
     CHECK_GOTO(!path, cleanup, "Invalid path parameter passed");
     individual_value = next_alloc_base64_parameter(&argv, &argc);
     CHECK_GOTO(individual_value.len == 0, cleanup, "Invalid individual parameter passed");
-    e2e_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
+    idata_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
 
     CHECK_GOTO(parse_alloc_astarte_invividual(interface, path, &individual_value, &data) != 0,
         cleanup, "Could not parse and allocate astarte individual");
@@ -232,7 +243,7 @@ int cmd_send_object_handler(const struct shell *sh, size_t argc, char **argv)
     int return_code = 1;
 
     char *path = NULL;
-    e2e_byte_array object_bytes = { 0 };
+    idata_byte_array object_bytes = { 0 };
     astarte_object_entry_t *entries = { 0 };
     size_t entries_length = { 0 };
     skip_parameter(&argv, &argc);
@@ -242,7 +253,7 @@ int cmd_send_object_handler(const struct shell *sh, size_t argc, char **argv)
     CHECK_GOTO(!path, cleanup, "Invalid path parameter passed");
     object_bytes = next_alloc_base64_parameter(&argv, &argc);
     CHECK_GOTO(object_bytes.len == 0, cleanup, "Invalid object parameter passed");
-    e2e_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
+    idata_timestamp_option_t timestamp = next_timestamp_parameter(&argv, &argc);
 
     CHECK_GOTO(
         parse_alloc_astarte_object(interface, path, &object_bytes, &entries, &entries_length) != 0,
@@ -276,7 +287,7 @@ int cmd_send_property_set_handler(const struct shell *sh, size_t argc, char **ar
     int return_code = 1;
 
     char *path = NULL;
-    e2e_byte_array property_value = { 0 };
+    idata_byte_array property_value = { 0 };
     astarte_data_t data = { 0 };
     skip_parameter(&argv, &argc);
     const astarte_interface_t *interface = next_interface_parameter(&argv, &argc);
@@ -330,6 +341,10 @@ cleanup:
 
 int cmd_disconnect(const struct shell *sh, size_t argc, char **argv)
 {
+    ARG_UNUSED(sh);
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+
     LOG_INF("Disconnect command handler"); // NOLINT
 
     LOG_INF("Stopping and joining the astarte device polling thread."); // NOLINT
@@ -361,9 +376,98 @@ static const astarte_interface_t *next_interface_parameter(char ***args, size_t 
     return interface;
 }
 
+static void skip_parameter(char ***args, size_t *argc)
+{
+    if (*argc < 1) {
+        // no more arguments
+        return;
+    }
+
+    *args += 1;
+    *argc -= 1;
+}
+
+static char *next_alloc_string_parameter(char ***args, size_t *argc)
+{
+    if (*argc < 1) {
+        // no more arguments
+        return NULL;
+    }
+
+    const char *const arg = (*args)[0];
+
+    size_t arg_len = strlen(arg);
+    char *const copied_arg = calloc(arg_len + 1, sizeof(char));
+    CHECK_HALT(!copied_arg, "Could not copy string parameter");
+    memcpy(copied_arg, arg, arg_len + 1);
+
+    // move to the next parameter for caller
+    *args += 1;
+    *argc -= 1;
+    return (char *) copied_arg;
+}
+
+static idata_byte_array next_alloc_base64_parameter(char ***args, size_t *argc)
+{
+    if (*argc < 1) {
+        // no more arguments
+        return (idata_byte_array) {};
+    }
+
+    const char *const arg = (*args)[0];
+    const size_t arg_len = strlen(arg);
+
+    size_t byte_array_length = 0;
+    int res = base64_decode(NULL, 0, &byte_array_length, arg, arg_len);
+    if (byte_array_length == 0) {
+        LOG_ERR("Error while computing base64 decode buffer length: %d", res); // NOLINT
+        return (idata_byte_array) {};
+    }
+
+    LOG_DBG("The size of the decoded buffer is: %d", byte_array_length); // NOLINT
+
+    uint8_t *const byte_array = calloc(byte_array_length, sizeof(uint8_t));
+    CHECK_HALT(!byte_array, "Out of memory");
+
+    res = base64_decode(byte_array, byte_array_length, &byte_array_length, arg, arg_len);
+    if (res != 0) {
+        LOG_ERR("Error while decoding base64 argument %d", res); // NOLINT
+        return (idata_byte_array) {};
+    }
+
+    // move to the next parameter for caller
+    *args += 1;
+    *argc -= 1;
+    return (idata_byte_array) {
+        .buf = byte_array,
+        .len = byte_array_length,
+    };
+}
+
+static idata_timestamp_option_t next_timestamp_parameter(char ***args, size_t *argc)
+{
+    const int base = 10;
+
+    if (*argc < 1) {
+        // no more arguments
+        return (idata_timestamp_option_t) {};
+    }
+
+    const char *const arg = (*args)[0];
+    const int64_t timestamp = (int64_t) strtoll(arg, NULL, base);
+
+    // move to the next parameter for caller
+    *args += 1;
+    *argc -= 1;
+    return (idata_timestamp_option_t) {
+        .value = timestamp,
+        .present = true,
+    };
+}
+
 // this also implicitly checks that the passed path is valid
-static int parse_alloc_astarte_invividual(
-    const astarte_interface_t *interface, char *path, e2e_byte_array *buf, astarte_data_t *out_data)
+static int parse_alloc_astarte_invividual(const astarte_interface_t *interface, char *path,
+    idata_byte_array *buf, astarte_data_t *out_data)
 {
     const astarte_mapping_t *mapping = NULL;
     astarte_result_t res = astarte_interface_get_mapping_from_path(interface, path, &mapping);
@@ -385,7 +489,7 @@ static int parse_alloc_astarte_invividual(
 
 // this also implicitly checks that the passed path is valid
 static int parse_alloc_astarte_object(const astarte_interface_t *interface, char *path,
-    e2e_byte_array *buf, astarte_object_entry_t **out_entries, size_t *out_entries_length)
+    idata_byte_array *buf, astarte_object_entry_t **out_entries, size_t *out_entries_length)
 {
     // Since the function expects a bson element we need to receive a "v" value like it would be
     // sent to astarte

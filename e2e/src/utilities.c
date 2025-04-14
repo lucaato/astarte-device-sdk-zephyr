@@ -12,7 +12,7 @@
 
 #include <zephyr/fatal.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/base64.h>
+#include <zephyr/shell/shell_uart.h>
 #include <zephyr/sys/bitarray.h>
 #include <zephyr/sys/timeutil.h>
 #include <zephyr/sys/util.h>
@@ -53,13 +53,15 @@ LOG_MODULE_REGISTER(utilities, CONFIG_UTILITIES_LOG_LEVEL); // NOLINT
 static bool cmp_string_array(astarte_data_stringarray_t *left, astarte_data_stringarray_t *right);
 static bool cmp_binaryblob_array(
     astarte_data_binaryblobarray_t *left, astarte_data_binaryblobarray_t *right);
-static astarte_data_t *get_object_entry_data(e2e_object_entry_array_t *entries, const char *key);
+static astarte_data_t *get_object_entry_data(idata_object_entry_array *entries, const char *key);
+// shell bypass callback
+static void shell_bypass_halt(const struct shell *shell, uint8_t *data, size_t len);
 
 /************************************************
  * Global functions definition
  ***********************************************/
 
-bool astarte_object_equal(e2e_object_entry_array_t *left, e2e_object_entry_array_t *right)
+bool astarte_object_equal(idata_object_entry_array *left, idata_object_entry_array *right)
 {
     if (left->len != right->len) {
         return false;
@@ -175,111 +177,35 @@ bool astarte_data_equal(astarte_data_t *left, astarte_data_t *right)
     CHECK_HALT(true, "Unreachable, the previous switch should handle all possible cases");
 }
 
-void utils_log_e2e_timestamp(e2e_timestamp_option_t *timestamp)
+void utils_log_timestamp(idata_timestamp_option_t *timestamp)
 {
-    struct tm *tm_obj = NULL;
-    char tm_str[MAX_TS_STR_LEN] = { 0 };
+    char tm_str[DATETIME_MAX_BUF_LEN] = { 0 };
     if (timestamp->present) {
-        tm_obj = gmtime(&timestamp->value);
-        (void) strftime(tm_str, MAX_TS_STR_LEN, "%Y-%m-%dT%H:%M:%S%z", tm_obj);
+        __ASSERT(utils_datetime_to_string(timestamp->value, tm_str) != 0,
+            "Buffer size for datetime conversion too small");
         LOG_INF("Timestamp: %s", tm_str); // NOLINT
     } else {
         LOG_INF("No timestamp"); // NOLINT
     }
 }
 
-void utils_log_e2e_object_entry_array(e2e_object_entry_array_t *obj)
+void utils_log_object_entry_array(idata_object_entry_array *obj)
 {
     utils_log_astarte_object(obj->buf, obj->len);
 }
 
-void skip_parameter(char ***args, size_t *argc)
+void block_shell_commands()
 {
-    if (*argc < 1) {
-        // no more arguments
-        return;
-    }
-
-    *args += 1;
-    *argc -= 1;
+    // Bypass shell commands until the e2e code re-enables them
+    const struct shell *uart_shell = shell_backend_uart_get_ptr();
+    shell_set_bypass(uart_shell, shell_bypass_halt);
 }
 
-char *next_alloc_string_parameter(char ***args, size_t *argc)
+void unblock_shell_commands()
 {
-    if (*argc < 1) {
-        // no more arguments
-        return NULL;
-    }
-
-    const char *const arg = (*args)[0];
-
-    size_t arg_len = strlen(arg);
-    char *const copied_arg = calloc(arg_len + 1, sizeof(char));
-    CHECK_HALT(!copied_arg, "Could not copy string parameter");
-    memcpy(copied_arg, arg, arg_len + 1);
-
-    // move to the next parameter for caller
-    *args += 1;
-    *argc -= 1;
-    return (char *) copied_arg;
-}
-
-e2e_byte_array next_alloc_base64_parameter(char ***args, size_t *argc)
-{
-    if (*argc < 1) {
-        // no more arguments
-        return (e2e_byte_array) {};
-    }
-
-    const char *const arg = (*args)[0];
-    const size_t arg_len = strlen(arg);
-
-    size_t byte_array_length = 0;
-    int res = base64_decode(NULL, 0, &byte_array_length, arg, arg_len);
-    if (byte_array_length == 0) {
-        LOG_ERR("Error while computing base64 decode buffer length: %d", res); // NOLINT
-        return (e2e_byte_array) {};
-    }
-
-    LOG_DBG("The size of the decoded buffer is: %d", byte_array_length); // NOLINT
-
-    uint8_t *const byte_array = calloc(byte_array_length, sizeof(uint8_t));
-    CHECK_HALT(!byte_array, "Out of memory");
-
-    res = base64_decode(byte_array, byte_array_length, &byte_array_length, arg, arg_len);
-    if (res != 0) {
-        LOG_ERR("Error while decoding base64 argument %d", res); // NOLINT
-        return (e2e_byte_array) {};
-    }
-
-    // move to the next parameter for caller
-    *args += 1;
-    *argc -= 1;
-    return (e2e_byte_array) {
-        .buf = byte_array,
-        .len = byte_array_length,
-    };
-}
-
-e2e_timestamp_option_t next_timestamp_parameter(char ***args, size_t *argc)
-{
-    const int base = 10;
-
-    if (*argc < 1) {
-        // no more arguments
-        return (e2e_timestamp_option_t) {};
-    }
-
-    const char *const arg = (*args)[0];
-    const int64_t timestamp = (int64_t) strtoll(arg, NULL, base);
-
-    // move to the next parameter for caller
-    *args += 1;
-    *argc -= 1;
-    return (e2e_timestamp_option_t) {
-        .value = timestamp,
-        .present = true,
-    };
+    // remove bypass to allow shell callbacks to be called
+    const struct shell *uart_shell = shell_backend_uart_get_ptr();
+    shell_set_bypass(uart_shell, NULL);
 }
 
 /************************************************
@@ -320,7 +246,7 @@ static bool cmp_binaryblob_array(
     return true;
 }
 
-static astarte_data_t *get_object_entry_data(e2e_object_entry_array_t *entries, const char *key)
+static astarte_data_t *get_object_entry_data(idata_object_entry_array *entries, const char *key)
 {
     for (size_t i = 0; i < entries->len; ++i) {
         if (strcmp(key, entries->buf[i].path) == 0) {
@@ -329,4 +255,11 @@ static astarte_data_t *get_object_entry_data(e2e_object_entry_array_t *entries, 
     }
 
     return NULL;
+}
+
+static void shell_bypass_halt(const struct shell *shell, uint8_t *data, size_t len)
+{
+    ARG_UNUSED(shell);
+
+    CHECK_HALT(len > 0 || data[0] != 10, "Shell commands are being ignored blocking execution");
 }

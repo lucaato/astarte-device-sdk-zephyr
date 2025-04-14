@@ -21,6 +21,10 @@
 
 #include <astarte_device_sdk/data.h>
 #include <astarte_device_sdk/object.h>
+#include <stdint.h>
+
+// Maximum size for the datetime string
+#define DATETIME_MAX_BUF_LEN 25
 
 #define UTILS_DATA_ELEMENTS 14
 
@@ -48,5 +52,16 @@ extern const char *const utils_string_array_data[2];
 void utils_log_astarte_data(astarte_data_t data);
 
 void utils_log_astarte_object(astarte_object_entry_t *entries, size_t entries_len);
+
+/**
+ * @brief Pretty print the datetime into the passed buffer.
+ *
+ * @param[in] datatime The date to transporm into string
+ * @param[out] out_string The data to log
+ *
+ * @return Number of bytes written if the return equals 0 the out_string content is not
+ * determined
+ */
+size_t utils_datetime_to_string(int64_t datetime, char out_string[const DATETIME_MAX_BUF_LEN]);
 
 #endif /* UTILS_H */

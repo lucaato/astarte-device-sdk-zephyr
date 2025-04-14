@@ -17,9 +17,6 @@ LOG_MODULE_REGISTER(utils, CONFIG_APP_LOG_LEVEL); // NOLINT
  * Constants, static variables and defines
  ***********************************************/
 
-// Maximum size for the datetime string
-#define DATETIME_MAX_STR_LEN 30
-
 // NOLINTBEGIN(readability-magic-numbers, cppcoreguidelines-avoid-magic-numbers)
 const uint8_t utils_binary_blob_data[8] = { 0x53, 0x47, 0x56, 0x73, 0x62, 0x47, 0x38, 0x3d };
 static const uint8_t binblob_1[8] = { 0x53, 0x47, 0x56, 0x73, 0x62, 0x47, 0x38, 0x3d };
@@ -47,8 +44,7 @@ const char *const utils_string_array_data[2] = { "Hello ", "world!" };
 // NOLINTNEXTLINE(hicpp-function-size)
 void utils_log_astarte_data(astarte_data_t data)
 {
-    struct tm *tm_obj = NULL;
-    char tm_str[DATETIME_MAX_STR_LEN] = { 0 };
+    char tm_str[DATETIME_MAX_BUF_LEN] = { 0 };
 
     switch (astarte_data_get_type(data)) {
         case ASTARTE_MAPPING_TYPE_BINARYBLOB:
@@ -84,8 +80,8 @@ void utils_log_astarte_data(astarte_data_t data)
         case ASTARTE_MAPPING_TYPE_DATETIME:
             int64_t datetime = false;
             (void) astarte_data_to_datetime(data, &datetime);
-            tm_obj = gmtime(&datetime);
-            (void) strftime(tm_str, DATETIME_MAX_STR_LEN, "%Y-%m-%dT%H:%M:%S%z", tm_obj);
+            __ASSERT(utils_datetime_to_string(datetime, tm_str) != 0,
+                "Buffer size for datetime conversion too small");
             LOG_INF("Astarte datetime: %s", tm_str); // NOLINT
             break;
         case ASTARTE_MAPPING_TYPE_DATETIMEARRAY:
@@ -94,8 +90,8 @@ void utils_log_astarte_data(astarte_data_t data)
             size_t datetimes_len = 0;
             (void) astarte_data_to_datetime_array(data, &datetimes, &datetimes_len);
             for (size_t i = 0; i < datetimes_len; i++) {
-                tm_obj = gmtime(&datetimes[i]);
-                (void) strftime(tm_str, DATETIME_MAX_STR_LEN, "%Y-%m-%dT%H:%M:%S%z", tm_obj);
+                __ASSERT(utils_datetime_to_string(datetimes[i], tm_str),
+                    "Buffer size for datetime conversion too small");
                 LOG_INF("    %zi: %s", i, tm_str); // NOLINT
             }
             break;
@@ -175,4 +171,10 @@ void utils_log_astarte_object(astarte_object_entry_t *entries, size_t entries_le
             utils_log_astarte_data(data);
         }
     }
+}
+
+size_t utils_datetime_to_string(int64_t datetime, char out_string[const DATETIME_MAX_BUF_LEN])
+{
+    struct tm *tm_obj = gmtime(&datetime);
+    return strftime(out_string, DATETIME_MAX_BUF_LEN - 1, "%Y-%m-%dT%H:%M:%S%z", tm_obj);
 }

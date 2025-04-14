@@ -4,12 +4,9 @@
 
 from cfgvalues import CfgValues
 
-from datetime import datetime
 import pytest
 from twister_harness import DeviceAdapter, Shell
 from west import log
-
-from typing import Dict, Optional
 
 
 class TestcaseHelper:

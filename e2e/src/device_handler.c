@@ -100,6 +100,12 @@ void free_device()
     CHECK_HALT(k_thread_join(&device_thread_data, K_FOREVER) != 0,
         "Failed in waiting for the Astarte thread to terminate.");
 
+    LOG_INF("Destroing Astarte device and freeing resources."); // NOLINT
+    CHECK_ASTARTE_OK_HALT(
+        astarte_device_destroy(device_handle), "Astarte device destruction failure.");
+
+    LOG_INF("Astarte device destroyed."); // NOLINT
+
     LOG_INF("Giving back the semaphore lock"); // NOLINT
     // allow creating another device with `device_setup`
     device_handle = NULL;
@@ -158,12 +164,6 @@ static void device_thread_entry_point(void *unused1, void *unused2, void *unused
 
     CHECK_ASTARTE_OK_HALT(astarte_device_disconnect(device_handle, K_SECONDS(10)),
         "Astarte device disconnection failure.");
-
-    LOG_INF("Destroing Astarte device and freeing resources."); // NOLINT
-    CHECK_ASTARTE_OK_HALT(
-        astarte_device_destroy(device_handle), "Astarte device destruction failure.");
-
-    LOG_INF("Astarte device destroyed."); // NOLINT
 
     LOG_INF("Exiting from the polling thread."); // NOLINT
 }

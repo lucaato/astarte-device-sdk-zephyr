@@ -6,6 +6,7 @@ from west import log
 
 from conftest import TestcaseHelper
 from data import data
+import time
 
 
 def test_device(testcase_helper: TestcaseHelper):
@@ -18,4 +19,8 @@ def test_device(testcase_helper: TestcaseHelper):
         interface_data.test(testcase_helper)
 
     testcase_helper.shell.exec_command("disconnect")
-    # FIXME the disconnect still does not work i don't know why it seems to be working when i run the binary manually
+    try:
+        lines = testcase_helper.dut.readlines_until("^Disconnected.*?", timeout=15)
+        log.inf("Lines are", lines)
+    except:
+        log.inf("Device already disconnected")

@@ -126,19 +126,10 @@ static size_t check_idata_size(idata_handle_t idata);
 // on current interface names to create a simple but unique hash.
 // If more interfaces are added this function should also change.
 static uint64_t interfaces_perfect_hash(const char *key_string, size_t len);
-// shell bypass callback
-static void shell_bypass_halt(const struct shell *shell, uint8_t *data, size_t len);
 
 /************************************************
  * Global functions definition
  ***********************************************/
-
-void block_shell_commands()
-{
-    // Bypass shell commands until the e2e code re-enables them
-    const struct shell *uart_shell = shell_backend_uart_get_ptr();
-    shell_set_bypass(uart_shell, shell_bypass_halt);
-}
 
 void run_e2e_test()
 {
@@ -176,8 +167,7 @@ void run_e2e_test()
     const struct shell *uart_shell = shell_backend_uart_get_ptr();
     shell_start(uart_shell);
     shell_print(uart_shell, "Device shell ready");
-    // remove bypass to allow callbacks to be called
-    shell_set_bypass(uart_shell, NULL);
+    unblock_shell_commands();
 
     // wait until a command disconnects the device
     wait_for_disconnection();
@@ -200,7 +190,6 @@ void run_e2e_test()
  * Static functions definitions
  ***********************************************/
 
-#if !CONFIG_LOG_ONLY
 // device data callbacks that check received data against expected
 static void device_individual_callback(astarte_device_datastream_individual_event_t event)
 {
@@ -211,7 +200,8 @@ static void device_individual_callback(astarte_device_datastream_individual_even
     CHECK_HALT(
         interface == NULL, "The interface name received as event does not match any interface");
 
-    e2e_individual_data_t expected = { 0 };
+#if !CONFIG_LOG_ONLY
+    idata_individual_t expected = { 0 };
     CHECK_HALT(idata_pop_individual(idata, interface, &expected) != 0, "No more expected data");
 
     CHECK_HALT(strcmp(expected.path, event.base_event.path) != 0,
@@ -220,6 +210,10 @@ static void device_individual_callback(astarte_device_datastream_individual_even
 
     free_individual(expected);
     LOG_INF("Individual received matched expected one");
+#else
+    LOG_INF("Individual received on %s%s", interface->name, event.base_event.path);
+    utils_log_astarte_data(event.data);
+#endif
 }
 
 static void device_object_callback(astarte_device_datastream_object_event_t event)
@@ -227,7 +221,7 @@ static void device_object_callback(astarte_device_datastream_object_event_t even
     LOG_INF("Object datastream callback");
 
     idata_handle_t idata = event.base_event.user_data;
-    e2e_object_entry_array_t received = {
+    idata_object_entry_array received = {
         .buf = event.entries,
         .len = event.entries_len,
     };
@@ -236,7 +230,8 @@ static void device_object_callback(astarte_device_datastream_object_event_t even
     CHECK_HALT(
         interface == NULL, "The interface name received as event does not match any interface");
 
-    e2e_object_data_t expected = {};
+#if !CONFIG_LOG_ONLY
+    idata_object_t expected = {};
     CHECK_HALT(idata_pop_object(idata, interface, &expected) != 0, "No more expected data");
 
     CHECK_HALT(strcmp(expected.path, event.base_event.path) != 0,
@@ -245,6 +240,10 @@ static void device_object_callback(astarte_device_datastream_object_event_t even
 
     free_object(expected);
     LOG_INF("Object received matched expected one");
+#else
+    LOG_INF("Aggregate data received on %s%s", interface->name, event.base_event.path);
+    utils_log_e2e_object_entry_array(&received);
+#endif
 }
 
 static void device_property_set_callback(astarte_device_property_set_event_t event)
@@ -257,7 +256,8 @@ static void device_property_set_callback(astarte_device_property_set_event_t eve
     CHECK_HALT(
         interface == NULL, "The interface name received as event does not match any interface");
 
-    e2e_property_data_t expected = { 0 };
+#if !CONFIG_LOG_ONLY
+    idata_property_t expected = { 0 };
     // inizialization
     CHECK_HALT(idata_pop_property(idata, interface, &expected), "No more expected data");
 
@@ -267,6 +267,10 @@ static void device_property_set_callback(astarte_device_property_set_event_t eve
 
     free_property(expected);
     LOG_INF("Property received matched expected one");
+#else
+    LOG_INF("Individual property set received on %s%s", interface->name, event.base_event.path);
+    utils_log_astarte_data(event.data);
+#endif
 }
 
 static void device_property_unset_callback(astarte_device_data_event_t event)
@@ -279,7 +283,8 @@ static void device_property_unset_callback(astarte_device_data_event_t event)
     CHECK_HALT(
         interface == NULL, "The interface name received as event does not match any interface");
 
-    e2e_property_data_t expected = { 0 };
+#if !CONFIG_LOG_ONLY
+    idata_property_t expected = { 0 };
     // inizialization
     CHECK_HALT(idata_pop_property(idata, interface, &expected), "No more expected data");
 
@@ -288,67 +293,10 @@ static void device_property_unset_callback(astarte_device_data_event_t event)
 
     free_property(expected);
     LOG_INF("Expected property unset received");
-}
 #else
-// device data callbacks that log received data
-static void device_individual_callback(astarte_device_datastream_individual_event_t event)
-{
-    LOG_INF("Individual datastream callback");
-    idata_handle_t idata = event.base_event.user_data;
-    const astarte_interface_t *interface = idata_get_interface(
-        idata, event.base_event.interface_name, strlen(event.base_event.interface_name));
-    CHECK_HALT(
-        interface == NULL, "The interface name received as event does not match any interface");
-
-    LOG_INF("Individual received on %s%s", interface->name, event.base_event.path);
-    utils_log_astarte_data(event.data);
-}
-
-static void device_object_callback(astarte_device_datastream_object_event_t event)
-{
-    LOG_INF("Object datastream callback");
-
-    idata_handle_t idata = event.base_event.user_data;
-    e2e_object_entry_array_t received = {
-        .buf = event.entries,
-        .len = event.entries_len,
-    };
-    const astarte_interface_t *interface = idata_get_interface(
-        idata, event.base_event.interface_name, strlen(event.base_event.interface_name));
-    CHECK_HALT(
-        interface == NULL, "The interface name received as event does not match any interface");
-
-    LOG_INF("Aggregate data received on %s%s", interface->name, event.base_event.path);
-    utils_log_e2e_object_entry_array(&received);
-}
-
-static void device_property_set_callback(astarte_device_property_set_event_t event)
-{
-    LOG_INF("Property set callback");
-
-    idata_handle_t idata = event.base_event.user_data;
-    const astarte_interface_t *interface = idata_get_interface(
-        idata, event.base_event.interface_name, strlen(event.base_event.interface_name));
-    CHECK_HALT(
-        interface == NULL, "The interface name received as event does not match any interface");
-
-    LOG_INF("Individual property set received on %s%s", interface->name, event.base_event.path);
-    utils_log_astarte_data(event.data);
-}
-
-static void device_property_unset_callback(astarte_device_data_event_t event)
-{
-    LOG_INF("Property unset callback");
-
-    idata_handle_t idata = event.user_data;
-    const astarte_interface_t *interface = idata_get_interface(
-        idata, event.interface_name, strlen(event.interface_name));
-    CHECK_HALT(
-        interface == NULL, "The interface name received as event does not match any interface");
-
     LOG_INF("Individual property unset received on %s%s", interface->name, event.path);
-}
 #endif
+}
 
 static uint64_t interfaces_perfect_hash(const char *key_string, size_t len)
 {
@@ -388,17 +336,17 @@ static size_t check_idata_size(idata_handle_t idata)
         not_received_count += idata_get_count(idata, interface);
 
         if (interface->type == ASTARTE_INTERFACE_TYPE_PROPERTIES) {
-            e2e_property_data_t *property = {};
+            idata_property_t *property = {};
             if (idata_peek_property(idata, interface, &property) == 0) {
                 utils_log_e2e_property(property);
             }
         } else if (interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_OBJECT) {
-            e2e_object_data_t *object = {};
+            idata_object_t *object = {};
             if (idata_peek_object(idata, interface, &object) == 0) {
                 utils_log_e2e_object(object);
             }
         } else if (interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL) {
-            e2e_individual_data_t *individual = {};
+            idata_individual_t *individual = {};
             if (idata_peek_individual(idata, interface, &individual) == 0) {
                 utils_log_e2e_individual(individual);
             }
@@ -406,11 +354,4 @@ static size_t check_idata_size(idata_handle_t idata)
     }
 
     return not_received_count;
-}
-
-static void shell_bypass_halt(const struct shell *shell, uint8_t *data, size_t len)
-{
-    ARG_UNUSED(shell);
-
-    CHECK_HALT(len > 0 || data[0] != 10, "Shell commands are being ignored blocking execution");
 }

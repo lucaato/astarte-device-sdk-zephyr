@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from datetime import datetime
 from typing import Any
 
 from west import log

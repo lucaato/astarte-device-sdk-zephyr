@@ -12,7 +12,6 @@
  * @brief Handle device object and threads, these function should be called by one thread only
  */
 
-#include "zephyr/device.h"
 #include <astarte_device_sdk/device.h>
 
 // Used only as a token to avoid

@@ -59,7 +59,9 @@ jobs:
 
       - name: Set up Python dependencies
         working-directory: astarte-device-sdk-zephyr/
-        run: pip install -r ./scripts/requirements.txt
+        run: |
+          pip install -r ./scripts/requirements.txt
+          pip install -r ./e2e/pytest/requirements.txt
 
       - name: Set E2E manifest as defaults
         working-directory: astarte-device-sdk-zephyr

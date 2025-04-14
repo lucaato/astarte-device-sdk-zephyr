@@ -24,6 +24,8 @@
 #include <object_private.h>
 #include <utils.h>
 
+#include "utilities.h"
+
 /************************************************
  * Constants, static variables and defines
  ***********************************************/
@@ -128,14 +130,14 @@ const astarte_interface_t *idata_get_interface(
 }
 
 int idata_add_individual(idata_handle_t idata, const astarte_interface_t *interface,
-    e2e_individual_data_t expected_individual)
+    idata_individual_t expected_individual)
 {
     CHECK_INDIVIDUAL_DS(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
 
-    astarte_message_t *message = spsc_acquire(&value->messages);
+    idata_message_t *message = spsc_acquire(&value->messages);
     CHECK_RET_1(message == NULL, "Space for expected messages is exhausted");
     message->individual = expected_individual;
     spsc_produce(&value->messages);
@@ -143,15 +145,15 @@ int idata_add_individual(idata_handle_t idata, const astarte_interface_t *interf
     return 0;
 }
 
-int idata_add_property(idata_handle_t idata, const astarte_interface_t *interface,
-    e2e_property_data_t expected_property)
+int idata_add_property(
+    idata_handle_t idata, const astarte_interface_t *interface, idata_property_t expected_property)
 {
     CHECK_INDIVIDUAL_PROP(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
 
-    astarte_message_t *message = spsc_acquire(&value->messages);
+    idata_message_t *message = spsc_acquire(&value->messages);
     CHECK_RET_1(message == NULL, "Space for expected messages is exhausted");
     message->property = expected_property;
     spsc_produce(&value->messages);
@@ -160,14 +162,14 @@ int idata_add_property(idata_handle_t idata, const astarte_interface_t *interfac
 }
 
 int idata_add_object(
-    idata_handle_t idata, const astarte_interface_t *interface, e2e_object_data_t expected_object)
+    idata_handle_t idata, const astarte_interface_t *interface, idata_object_t expected_object)
 {
     CHECK_AGGREGATE_DS(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
 
-    astarte_message_t *message = spsc_acquire(&value->messages);
+    idata_message_t *message = spsc_acquire(&value->messages);
     CHECK_RET_1(message == NULL, "Space for expected messages is exhausted");
     message->object = expected_object;
     spsc_produce(&value->messages);
@@ -183,15 +185,15 @@ size_t idata_get_count(idata_handle_t idata, const astarte_interface_t *interfac
     return spsc_consumable(&value->messages);
 }
 
-int idata_pop_individual(idata_handle_t idata, const astarte_interface_t *interface,
-    e2e_individual_data_t *out_individual)
+int idata_pop_individual(
+    idata_handle_t idata, const astarte_interface_t *interface, idata_individual_t *out_individual)
 {
     CHECK_RET_1(out_individual == NULL, "Passed out pointer is null");
     CHECK_INDIVIDUAL_DS(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
-    astarte_message_t *message = spsc_consume(&value->messages);
+    idata_message_t *message = spsc_consume(&value->messages);
     CHECK_RET_1(message == NULL, "No more expected messages");
     *out_individual = message->individual;
     spsc_release(&value->messages);
@@ -200,14 +202,14 @@ int idata_pop_individual(idata_handle_t idata, const astarte_interface_t *interf
 }
 
 int idata_pop_property(
-    idata_handle_t idata, const astarte_interface_t *interface, e2e_property_data_t *out_property)
+    idata_handle_t idata, const astarte_interface_t *interface, idata_property_t *out_property)
 {
     CHECK_RET_1(out_property == NULL, "Passed out pointer is null");
     CHECK_INDIVIDUAL_PROP(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
-    astarte_message_t *message = spsc_consume(&value->messages);
+    idata_message_t *message = spsc_consume(&value->messages);
     CHECK_RET_1(message == NULL, "No more expected messages");
     *out_property = message->property;
     spsc_release(&value->messages);
@@ -216,14 +218,14 @@ int idata_pop_property(
 }
 
 int idata_pop_object(
-    idata_handle_t idata, const astarte_interface_t *interface, e2e_object_data_t *out_object)
+    idata_handle_t idata, const astarte_interface_t *interface, idata_object_t *out_object)
 {
     CHECK_RET_1(out_object == NULL, "Passed out pointer is null");
     CHECK_AGGREGATE_DS(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
-    astarte_message_t *message = spsc_consume(&value->messages);
+    idata_message_t *message = spsc_consume(&value->messages);
     CHECK_RET_1(message == NULL, "No more expected messages");
     *out_object = message->object;
     spsc_release(&value->messages);
@@ -232,13 +234,13 @@ int idata_pop_object(
 }
 
 int idata_peek_individual(idata_handle_t idata, const astarte_interface_t *interface,
-    e2e_individual_data_t **out_individual_ref)
+    idata_individual_t **out_individual_ref)
 {
     CHECK_INDIVIDUAL_DS(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
-    astarte_message_t *message = spsc_peek(&value->messages);
+    idata_message_t *message = spsc_peek(&value->messages);
     CHECK_RET_1(!message);
 
     if (out_individual_ref) {
@@ -247,14 +249,14 @@ int idata_peek_individual(idata_handle_t idata, const astarte_interface_t *inter
 
     return 0;
 }
-int idata_peek_property(idata_handle_t idata, const astarte_interface_t *interface,
-    e2e_property_data_t **out_property_ref)
+int idata_peek_property(
+    idata_handle_t idata, const astarte_interface_t *interface, idata_property_t **out_property_ref)
 {
     CHECK_INDIVIDUAL_PROP(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
-    astarte_message_t *message = spsc_peek(&value->messages);
+    idata_message_t *message = spsc_peek(&value->messages);
     CHECK_RET_1(!message);
 
     if (out_property_ref) {
@@ -265,13 +267,13 @@ int idata_peek_property(idata_handle_t idata, const astarte_interface_t *interfa
 }
 
 int idata_peek_object(
-    idata_handle_t idata, const astarte_interface_t *interface, e2e_object_data_t **out_object_ref)
+    idata_handle_t idata, const astarte_interface_t *interface, idata_object_t **out_object_ref)
 {
     CHECK_AGGREGATE_DS(interface->aggregation, interface->type);
 
     idata_map_value_t *value = {};
     CHECK_RET_1(!map_get_intf(idata, interface, &value), "Unknown passed interface");
-    astarte_message_t *message = spsc_peek(&value->messages);
+    idata_message_t *message = spsc_peek(&value->messages);
     CHECK_RET_1(!message);
 
     if (out_object_ref) {
@@ -281,20 +283,20 @@ int idata_peek_object(
     return 0;
 }
 
-void free_individual(e2e_individual_data_t individual)
+void free_individual(idata_individual_t individual)
 {
     free((char *) individual.path);
     astarte_data_destroy_deserialized(individual.data);
 }
 
-void free_object(e2e_object_data_t object)
+void free_object(idata_object_t object)
 {
     free((char *) object.path);
     free(object.object_bytes.buf);
     astarte_object_entries_destroy_deserialized(object.entries.buf, object.entries.len);
 }
 
-void free_property(e2e_property_data_t property)
+void free_property(idata_property_t property)
 {
     // unsets do not store an individual value
     if (!property.unset) {
@@ -314,21 +316,21 @@ void idata_free(idata_handle_t idata)
     free(idata);
 }
 
-void utils_log_e2e_individual(e2e_individual_data_t *individual)
+void utils_log_e2e_individual(idata_individual_t *individual)
 {
     LOG_INF("Individual path: %s", individual->path);
-    utils_log_e2e_timestamp(&individual->timestamp);
+    utils_log_timestamp(&individual->timestamp);
     utils_log_astarte_data(individual->data);
 }
 
-void utils_log_e2e_object(e2e_object_data_t *object)
+void utils_log_e2e_object(idata_object_t *object)
 {
     LOG_INF("Object path: %s", object->path);
-    utils_log_e2e_timestamp(&object->timestamp);
-    utils_log_e2e_object_entry_array(&object->entries);
+    utils_log_timestamp(&object->timestamp);
+    utils_log_object_entry_array(&object->entries);
 }
 
-void utils_log_e2e_property(e2e_property_data_t *property)
+void utils_log_e2e_property(idata_property_t *property)
 {
     LOG_INF("Property path: %s", property->path);
     if (property->unset) {
@@ -351,17 +353,17 @@ static void free_map_entry_callback(uint64_t key, uint64_t value, void *user_dat
     idata_map_value_t *data_value = UINT_TO_POINTER(value);
 
     if (data_value->interface->type == ASTARTE_INTERFACE_TYPE_PROPERTIES) {
-        e2e_property_data_t property = {};
+        idata_property_t property = {};
         while (idata_pop_property(idata, data_value->interface, &property) == 0) {
             free_property(property);
         }
     } else if (data_value->interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_OBJECT) {
-        e2e_object_data_t object = {};
+        idata_object_t object = {};
         while (idata_pop_object(idata, data_value->interface, &object) == 0) {
             free_object(object);
         }
     } else if (data_value->interface->aggregation == ASTARTE_INTERFACE_AGGREGATION_INDIVIDUAL) {
-        e2e_individual_data_t individual = {};
+        idata_individual_t individual = {};
         while (idata_pop_individual(idata, data_value->interface, &individual) == 0) {
             free_individual(individual);
         }

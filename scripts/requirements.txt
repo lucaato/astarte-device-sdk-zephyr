@@ -8,4 +8,3 @@ clang-tidy==18.1.1
 astarte-device-sdk
 python-dotenv
 bson
-curlify
